@@ -239,7 +239,7 @@
       <text class="w nr-tb" x="440" y="40" style="text-anchor:start">+ b 0</text>
       <circle class="nd" cx="420" cy="154" r="66"/>
       <text class="sig" x="420" y="150">Σ</text>
-      <text class="z nr-z" x="420" y="194">0</text>
+      <text class="z nr-z" x="420" y="190">0</text>
       <rect class="nd" x="540" y="104" width="120" height="100" rx="6"/>
       <path class="ax" d="M552,178 H648 M600,114 V194"/>
       <path class="stp" d="M554,178 H600 V124 H646"/>
@@ -331,30 +331,39 @@
             ctx.strokeStyle = C.ink; ctx.lineWidth = 4.5; ctx.lineCap = 'round';
             Kit.sketchLine(ctx, ax, ay, bx, by, { wobble: 1.4, seed: 5 });
             const sx = (PW - M.l - M.r) / (R.x1 - R.x0), sy = (PH - M.t - M.b) / (R.y1 - R.y0);
-            let nx = S.w1 * sx, ny = -S.w2 * sy; const nl = Math.hypot(nx, ny) || 1; nx /= nl; ny /= nl;
+            // unit normal of the line on screen, pointing to the "1" side
+            let nx = S.w1 / sx, ny = -S.w2 / sy; const nl = Math.hypot(nx, ny) || 1; nx /= nl; ny /= nl;
             ctx.font = `34px ${C.fontHand}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
             const LBL = '출력 1 쪽', lw = ctx.measureText(LBL).width + 8, lh = 36;
             const boxGap = (px, py, hw, hh, cx, cy) => Math.hypot(Math.max(0, Math.abs(px - cx) - hw), Math.max(0, Math.abs(py - cy) - hh));
             const ext = Math.abs(nx) * lw / 2 + Math.abs(ny) * lh / 2; // label half-size along the arrow
+            // the whole label box must sit on side s of the line, ≥ 6px away from it
+            const offLine = (cx, cy, s) => [[-1, -1], [1, -1], [-1, 1], [1, 1]].every(([u, v]) => s * ((cx + u * lw / 2 - ax) * nx + (cy + v * lh / 2 - ay) * ny) > 6);
+            const inPlot = (x, y) => x > M.l + 2 && x < PW - M.r - 2 && y > M.t + 2 && y < PH - M.b - 2;
+            // preferred: label on the "1" side, arrow from the line toward it.
+            // when that side is too small to hold it: label on the "0" side, arrow crossing the line into the "1" side.
             let best = null;
-            for (const t of [0.5, 0.38, 0.62, 0.26, 0.74, 0.14, 0.86]) for (const d of [58, 80, 104, 130, 156]) {
-              if (d - ext - 6 < 30) continue;
-              const ox = ax + (bx - ax) * t, oy = ay + (by - ay) * t, cx = ox + nx * d, cy = oy + ny * d;
+            // (m slides the label sideways, parallel to the line: it never moves closer to the line or onto the arrow)
+            for (const s of [1, -1]) for (const t of [0.5, 0.38, 0.62, 0.26, 0.74, 0.14, 0.86]) for (const d of [58, 80, 104, 130, 156, 184, 214]) for (const m of [0, 30, -30, 60, -60, 95, -95]) {
+              if (d - ext - 6 < (s > 0 ? 30 : 24)) continue;
+              const ox = ax + (bx - ax) * t, oy = ay + (by - ay) * t, cx = ox + s * nx * d - ny * m, cy = oy + s * ny * d + nx * m;
               if (cx - lw / 2 < M.l + 4 || cx + lw / 2 > PW - M.r - 4 || cy - lh / 2 < M.t + 2 || cy + lh / 2 > PH - M.b - 4) continue;
+              if (!offLine(cx, cy, s) || (s < 0 && !inPlot(ox + nx * 18, oy + ny * 18))) continue;
               let clear = 60;
               P.forEach((p) => {
                 const px = X(p.x), py = Y(p.y);
-                clear = Math.min(clear, boxGap(px, py, lw / 2, lh / 2, cx, cy) - rr - 8);
+                clear = Math.min(clear, boxGap(px, py, lw / 2, lh / 2, cx, cy) - rr - 11); // clear of the dashed "wrong" ring and the yellow focus ring
                 if (!study) clear = Math.min(clear, boxGap(px, py + rr + 24, lw / 2 + 42, lh / 2 + 12, cx, cy));
               });
-              const score = Math.min(clear, 24) - Math.abs(t - 0.5) * 16 - (d - 58) * 0.06;
-              if (!best || score > best.score) best = { score, ox, oy, cx, cy, d };
+              const score = (clear > 0 ? 100 : 0) + Math.min(clear, 24) - Math.abs(t - 0.5) * 16 - (d - 58) * 0.06 - Math.abs(m) * 0.1 - (s < 0 ? 30 : 0);
+              if (!best || score > best.score) best = { score, s, ox, oy, cx, cy, d };
             }
-            if (!best) { const mx = (ax + bx) / 2, my = (ay + by) / 2, d = ext + 52; best = { ox: mx, oy: my, d, cx: Kit.clamp(mx + nx * d, M.l + 60, PW - M.r - 60), cy: Kit.clamp(my + ny * d, M.t + 20, PH - M.b - 20) }; }
-            ctx.strokeStyle = C.pen; ctx.fillStyle = C.pen; ctx.lineWidth = 3;
-            const al = Kit.clamp(best.d - ext - 6, 26, 46);
-            arrow(ctx, best.ox, best.oy, best.ox + nx * al, best.oy + ny * al, 12);
-            ctx.fillText(LBL, best.cx, best.cy);
+            if (best) {
+              ctx.strokeStyle = C.pen; ctx.fillStyle = C.pen; ctx.lineWidth = 3;
+              if (best.s > 0) { const al = Kit.clamp(best.d - ext - 6, 26, 46); arrow(ctx, best.ox, best.oy, best.ox + nx * al, best.oy + ny * al, 12); }
+              else { const back = Math.min(best.d - ext - 6, 46); arrow(ctx, best.ox - nx * back, best.oy - ny * back, best.ox + nx * 18, best.oy + ny * 18, 12); }
+              ctx.fillText(LBL, best.cx, best.cy);
+            }
           }
           // points
           P.forEach((p, i) => {
@@ -370,8 +379,11 @@
               dot(ctx, x, y, rr + 7); ctx.stroke(); ctx.restore();
             }
             if (!study) {
-              ctx.fillStyle = C.ink2; ctx.font = `600 21px ${C.fontMono}`; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-              ctx.fillText(`(${p.x},${p.y})`, x, y + rr + 12);
+              // paper halo so the decision line never cuts through a coordinate label
+              ctx.font = `600 21px ${C.fontMono}`; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+              ctx.strokeStyle = C.paper; ctx.lineWidth = 6; ctx.lineJoin = 'round';
+              ctx.strokeText(`(${p.x},${p.y})`, x, y + rr + 12);
+              ctx.fillStyle = C.ink2; ctx.fillText(`(${p.x},${p.y})`, x, y + rr + 12);
             }
           });
         }
@@ -392,7 +404,13 @@
           $('.nr-tw1').textContent = '× ' + sgn(S.w1, 2);
           $('.nr-tw2').textContent = '× ' + sgn(S.w2, 2);
           $('.nr-tb').textContent = (S.b < 0 ? '+ b (' + sgn(S.b, 1) + ')' : '+ b (' + S.b.toFixed(1) + ')');
-          $('.nr-z').textContent = '= ' + sgn(z, 2);
+          // the sum must fit inside the Σ circle: "= −46.20" is wider than the chord at 24px, so shrink it (never below 20px)
+          const zt = $('.nr-z'), zs = '= ' + sgn(z, 2);
+          zt.textContent = zs; zt.style.fontSize = '';
+          let zw = 0;
+          try { zw = zt.getComputedTextLength(); } catch (e) { /* not laid out yet */ }
+          if (!(zw > 0)) zw = zs.length * 0.6 * 24;
+          if (zw > 100) zt.style.fontSize = Math.max(20, Math.floor((2400 / zw) * 10) / 10) + 'px';
           $('.nr-o').textContent = String(o);
           $('.nr-on').classList.toggle('on', o === 1);
           const ol = $('.nr-ol');
@@ -443,7 +461,7 @@
         cv.cv.addEventListener('pointerdown', (e) => { const i = hit(e); if (i >= 0) { S.sel = i; sync(); } });
         setMode('study');
         K.onTheme(draw);
-        onFonts(draw);
+        onFonts(sync);
       },
     },
 
@@ -481,7 +499,7 @@
     <div class="xn-bar"><span class="mono tiny muted">데이터</span><button class="chip on" data-k="xor">XOR</button><button class="chip" data-k="circle">동심원</button><button class="chip" data-k="spiral">나선</button>
       <span style="flex:1"></span><button class="btn xn-run">학습 시작</button><button class="btn ghost xn-reset">초기화</button></div>
     <div class="xn-bar"><div class="field" style="width:420px"><label>은닉(숨은) 뉴런 수 <output class="xn-ho">6</output></label><input type="range" class="xn-h" min="2" max="16" step="1" value="6" aria-label="은닉(숨은) 뉴런 수"></div>
-      <div class="hand" style="font-size:38px;margin-left:18px">직선 하나로는 못 나누는 모양</div></div>
+      <div class="hand" style="font-size:38px;margin-left:18px;word-break:keep-all">직선 하나로는 못 나누는 모양</div></div>
     <div class="xn-mid">
       <div class="xn-net"></div>
       <div class="xn-st">
@@ -701,10 +719,13 @@
         }
         function reset() { S.u = S.u0; S.trail = [S.u0]; S.done = null; S.hop = null; S.auto = false; }
         // a ball that flew off the curve is pinned to the top edge so it stays visible
-        const OUTX = (u) => Kit.clamp(X(u), 22, W - 22), OUTY = 20;
+        // (in the top-left corner it drops below the '높이 = 손실' label instead of covering it)
+        const AXL = '높이 = 손실 (틀린 정도)';
+        let axR = 260; // right end of that label, re-measured in draw()
+        const OUTX = (u) => Kit.clamp(X(u), 22, W - 22), OUTY = (x) => (x < axR + 20 ? 56 : 20);
         function hopPath(a, b) {
           const out = Math.abs(b) > 1.62;
-          const ax = X(a), ay = Y(GDF(a)) - 15, bx = out ? OUTX(b) : X(b), by = out ? OUTY : Y(GDF(b)) - 15;
+          const ax = X(a), ay = Y(GDF(a)) - 15, bx = out ? OUTX(b) : X(b), by = out ? OUTY(bx) : Y(GDF(b)) - 15;
           const lift = 26 + Math.abs(bx - ax) * 0.28;
           return { ax, ay, bx, by, cx: (ax + bx) / 2, cy: Math.min(ay, by) - lift };
         }
@@ -729,10 +750,9 @@
           ctx.strokeStyle = C.ink3; ctx.fillStyle = C.ink3; ctx.lineWidth = 2;
           arrow(ctx, 24, H - 4, 24, 12, 10);
           arrow(ctx, 24, H - 4, W - 6, H - 4, 10);
-          ctx.fillStyle = C.ink2; ctx.font = `21px ${C.fontBody}`; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-          ctx.fillText('높이 = 손실 (틀린 정도)', 38, 6);
-          ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+          ctx.fillStyle = C.ink2; ctx.font = `21px ${C.fontBody}`; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
           ctx.fillText('가로 = 가중치 값 →', W - 16, H - 12);
+          axR = 38 + ctx.measureText(AXL).width;
           // hop arcs + footprints
           const T = S.trail, nShow = S.hop ? T.length - 1 : T.length;
           ctx.save(); ctx.setLineDash([7, 6]); ctx.strokeStyle = C.pen; ctx.lineWidth = 2.2; ctx.globalAlpha = 0.75;
@@ -750,20 +770,45 @@
             ctx.beginPath(); ctx.ellipse(5, -9, 3.2, 5.5, 0.2, 0, Math.PI * 2); ctx.fill();
             ctx.restore();
           }
+          // y-axis label after the hop arcs, on a paper patch so a dashed arc never runs through it
+          ctx.font = `21px ${C.fontBody}`; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+          ctx.fillStyle = C.paper; ctx.fillRect(34, 2, axR - 30, 32);
+          ctx.fillStyle = C.ink2; ctx.fillText(AXL, 38, 6);
           // ball
           let bx, by;
           if (S.hop) {
             const h = hopPath(S.hop.a, S.hop.b), t = Kit.clamp(S.hop.t, 0, 1), it = 1 - t;
             bx = it * it * h.ax + 2 * it * t * h.cx + t * t * h.bx; by = it * it * h.ay + 2 * it * t * h.cy + t * t * h.by;
-          } else if (Math.abs(S.u) > 1.62) { bx = OUTX(S.u); by = OUTY; } else { bx = X(S.u); by = Y(GDF(S.u)) - 15; }
+          } else if (Math.abs(S.u) > 1.62) { bx = OUTX(S.u); by = OUTY(bx); } else { bx = X(S.u); by = Y(GDF(S.u)) - 15; }
           // next-step arrow (learning rate × slope)
           if (!S.hop && !S.done && Math.abs(S.u) <= 1.62) {
-            const nu = S.u - S.lr * GDD(S.u), tx = Kit.clamp(X(nu), 8, W - 8), ay = by - 44;
+            const nu = S.u - S.lr * GDD(S.u), tx = Kit.clamp(X(nu), 8, W - 8);
+            // 44px above the ball; for a ball near the top edge keep 20px of room, and if a long arrow
+            // would then run through the '높이 = 손실' label, drop it below that label
+            let ay = Math.max(by - 44, 20);
+            if (ay < 40 && Math.min(bx, tx) < axR + 8) ay = 44;
             if (Math.abs(tx - bx) > 6) {
               ctx.strokeStyle = C.pen; ctx.fillStyle = C.pen; ctx.lineWidth = 3;
               arrow(ctx, bx, ay, tx, ay, 13);
-              ctx.font = `28px ${C.fontHand}`; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-              ctx.fillText('학습률 × 기울기', Kit.clamp((bx + tx) / 2, 110, W - 110), ay - 8);
+              ctx.font = `28px ${C.fontHand}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+              // label above the arrow, below it, or past its tip; never under the message box, the axis label
+              // or the ball, and always in the air above the curve (a steep wall would otherwise run through it)
+              const LB = '학습률 × 기울기', lw = ctx.measureText(LB).width, lh = 32, o = $('.gd-out');
+              const blocks = [[o.offsetLeft - 6, o.offsetTop - 4, o.offsetLeft + o.offsetWidth + 6, o.offsetTop + o.offsetHeight + 4], [0, 0, axR + 8, 34], [bx - 20, by - 20, bx + 20, by + 20]];
+              const lo = Math.min(bx, tx), hi = Math.max(bx, tx);
+              const inAir = (r) => { for (let x = Math.max(r[0], 60); x <= Math.min(r[2], W - 60); x += 4) if (Y(GDF(IX(x))) < r[3] + 4) return false; return true; };
+              const cands = [];
+              for (const dy of [-(8 + lh / 2), 8 + lh / 2]) for (const f of [0.5, 0.35, 0.65, 0.2, 0.8, 0.05, 0.95]) cands.push([Kit.clamp(lo + (hi - lo) * f, lw / 2 + 4, W - lw / 2 - 4), ay + dy]);
+              cands.push([tx < bx ? tx - 10 - lw / 2 : tx + 10 + lw / 2, ay]);
+              const pos = cands.find(([cx, cy]) => {
+                const r = [cx - lw / 2, cy - lh / 2, cx + lw / 2, cy + lh / 2];
+                return r[0] >= 2 && r[2] <= W - 2 && r[1] >= 2 && r[3] <= H - 2 && inAir(r) && !blocks.some((b) => r[0] < b[2] && r[2] > b[0] && r[1] < b[3] && r[3] > b[1]);
+              });
+              if (pos) {
+                // paper halo: an earlier dashed hop arc may pass behind the label
+                ctx.save(); ctx.strokeStyle = C.paper; ctx.lineWidth = 6; ctx.lineJoin = 'round'; ctx.strokeText(LB, pos[0], pos[1]); ctx.restore();
+                ctx.fillText(LB, pos[0], pos[1]);
+              }
             }
           }
           dot(ctx, bx, by, 15); ctx.fillStyle = C.hl; ctx.fill(); ctx.strokeStyle = C.ink; ctx.lineWidth = 3; ctx.stroke();
@@ -788,7 +833,7 @@
           ab.textContent = S.auto ? '멈춤' : '자동';
           ab.classList.toggle('on', S.auto);
         }
-        function render() { draw(); ui(); }
+        function render() { ui(); draw(); } // ui first: draw() reads the message box size
         // initial picture: a finished walk at lr ≈ 0.07 (13 steps)
         while (!S.done) step(false);
         $('.gd-lr').addEventListener('input', (e) => { S.lr = LR(+e.target.value); reset(); render(); });
@@ -826,7 +871,9 @@
       notes: '컴퓨터에게 그림은 숫자 표입니다. 칸마다 0(빈칸)부터 255(가장 진함)까지의 숫자 하나(MNIST와 같은 방식이고, 보통 사진 파일은 반대로 0이 검정). 앞에서 본 뉴런의 입력 x₁, x₂ 자리에 바로 이 숫자들이 들어갑니다.\n[실습] 왼쪽 칸에 마우스로 숫자를 그려 보세요. 오른쪽 숫자가 동시에 바뀝니다. 칸 위에 마우스를 올리면 양쪽에서 같은 칸이 표시됩니다. [지우기]로 비우고, [예시 ‘7’]로 처음 그림을 다시 불러옵니다.\n이 그림은 16×16 = 256개. 손글씨 숫자 데이터셋 MNIST는 28×28 = 784개. 휴대폰 사진은 1,200만 칸 × 3(빨강·초록·파랑) = 3,600만 개.\n질문: “사진을 좌우로 뒤집으면 숫자 표는 어떻게 바뀔까? 그래도 AI에게 같은 숫자 ‘7’일까?”',
       html: `
 <style>
-#f-pixels .px-top{display:flex;justify-content:space-between;align-items:flex-end}
+#f-pixels .px-top{display:flex;justify-content:space-between;align-items:flex-end;gap:40px}
+#f-pixels .px-top > .stack{flex:none}
+#f-pixels .px-top .hand{text-align:right;word-break:keep-all}
 #f-pixels .px-main{display:grid;grid-template-columns:448px 64px 800px;gap:0 22px;align-items:start}
 #f-pixels .px-cap{font-family:var(--font-mono);font-size:21px;color:var(--ink-2);margin-bottom:8px;white-space:nowrap}
 #f-pixels .px-eq{font-family:var(--font-display);font-weight:800;font-size:96px;line-height:1;align-self:center;text-align:center;margin-top:30px}
@@ -842,7 +889,7 @@
   <div class="hand">왼쪽에 그리면, 오른쪽 숫자가 바로 바뀐다</div>
 </div>
 <div class="px-main demo">
-  <div><div class="px-cap">16 × 16 칸 · 마우스로 그리기</div><div class="px-grid"></div></div>
+  <div><div class="px-cap">16 × 16 칸 · <span class="if-mouse">마우스로</span><span class="if-touch">손가락으로</span> 그리기</div><div class="px-grid"></div></div>
   <div class="px-eq">=</div>
   <div><div class="px-cap">컴퓨터가 받는 것: 숫자 256개 (0 = 빈칸, 255 = 가장 진함)</div><div class="px-num"></div></div>
 </div>
@@ -928,7 +975,7 @@
         g.addEventListener('pointercancel', stop);
         g.addEventListener('pointerleave', () => { if (!painting) { hov = -1; draw(); } });
         ncv.cv.addEventListener('pointermove', (e) => { hov = cell(Kit.pt(e, ncv.cv), MCW); draw(); });
-        ncv.cv.addEventListener('pointerleave', () => { hov = -1; draw(); });
+        ncv.cv.addEventListener('pointerleave', (e) => { if (e.pointerType === 'touch') return; hov = -1; draw(); });
         $('.px-clear').addEventListener('click', () => { Gd.fill(0); draw(); });
         $('.px-seven').addEventListener('click', () => { seven(); draw(); });
         seven();
@@ -1069,11 +1116,11 @@
 #f-concepts-recap .rc .px{fill:var(--ink)}
 #f-concepts-recap .rc .tl{stroke:var(--ink-3);stroke-width:4;stroke-linecap:round}
 #f-concepts-recap .rc .run{fill:var(--hl);stroke:var(--ink);stroke-width:3}
-#f-concepts-recap .rc-n{position:absolute;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;text-align:center;background:var(--paper);border:3px solid var(--ink);border-radius:18px 6px 16px 5px / 6px 16px 5px 18px;transition:background .25s,border-color .25s}
+#f-concepts-recap .rc-n{position:absolute;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;text-align:center;background:var(--paper);border:3px solid var(--ink);border-radius:18px 6px 16px 5px / 6px 16px 5px 18px;transition:box-shadow .25s,border-color .25s}
 #f-concepts-recap .rc-n b{font-family:var(--font-display);font-weight:800;font-size:36px;line-height:1.1}
 #f-concepts-recap .rc-n > span{font-size:21px;color:var(--ink-2);line-height:1.3}
 #f-concepts-recap .rc-n em{font-style:normal;color:var(--ink)}
-#f-concepts-recap .rc-n.on{background:var(--pen-soft);border-color:var(--pen)}
+#f-concepts-recap .rc-n.on{box-shadow:inset 0 0 0 200px var(--pen-soft);border-color:var(--pen)} /* tint over the opaque paper: the loop ball passing behind the box must not show through the text */
 #f-concepts-recap .rc-lab{position:absolute;font-size:21px;color:var(--ink-2);line-height:1.3}
 #f-concepts-recap .rc-mid{position:absolute;left:690px;top:100px;width:300px;text-align:center}
 #f-concepts-recap .rc-bot{display:grid;grid-template-columns:1fr 1fr 1.08fr;gap:34px;flex:1;min-height:0}

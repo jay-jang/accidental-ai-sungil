@@ -225,7 +225,7 @@
           #f-tesla .te-dot { fill: var(--pen); stroke: var(--paper); stroke-width: 3; }
           #f-tesla .te-car { position: absolute; left: 263px; top: 190px; --w: 174px; --ratio: 4 / 3; --pos: 50% 55%; padding-bottom: 40px; }
           #f-tesla .te-car figcaption { font-size: 26px; }
-          #f-tesla .te-cap { position: absolute; left: 6px; top: 498px; width: 680px; min-height: 76px; font-size: 26px; line-height: 1.4; }
+          #f-tesla .te-cap { position: absolute; left: 6px; top: 498px; width: 680px; min-height: 76px; font-size: 26px; line-height: 1.4; word-break: keep-all; }
           #f-tesla .te-cap b { font-family: var(--font-mono); color: var(--pen); margin-right: 6px; }
           #f-tesla .te-ctl { position: absolute; left: 6px; top: 578px; width: 690px; display: flex; gap: 12px; align-items: center; }
           #f-tesla .te-ctl .btn { white-space: nowrap; flex: none; }
@@ -594,7 +594,9 @@
           #f-talent-flow .end text { font-family: var(--font-body); font-size: 21px; fill: var(--ink-2); }
           #f-talent-flow .end text tspan.nm { font-weight: 700; fill: var(--ink); }
           #f-talent-flow .end.sel text, #f-talent-flow .end.sel text tspan.nm { fill: var(--sticky-ink); }
-          #f-talent-flow.has-sel .end:not(.sel), #f-talent-flow.has-sel .stn { opacity: .35; }
+          #f-talent-flow.has-sel .end:not(.sel) { opacity: .35; }
+          #f-talent-flow.has-sel .stn:not(.on) { opacity: .18; }
+          #f-talent-flow.has-sel .stn.on { fill: var(--ink); }
           #f-talent-flow .tick { fill: none; stroke: var(--ink-3); stroke-width: 2; }
           #f-talent-flow .spring { fill: var(--ink); }
           #f-talent-flow .sp-t { font-family: var(--font-body); font-size: 21px; fill: var(--ink); font-weight: 700; paint-order: stroke; stroke: var(--paper); stroke-width: 7px; stroke-linejoin: round; }
@@ -607,7 +609,7 @@
           #f-talent-flow .tf-cap .photo::before { width: 60%; height: 20px; top: -10px; }
         </style>
         <div class="kicker">2010 → 2026 · 사람이 움직이면 회사가 생긴다</div>
-        <h2 class="title">인재의 강</h2>
+        <h2 class="title" style="margin-top:-6px">인재의 강</h2>
         <div class="abs tf-cap"><div class="hand" style="font-size:40px;transform:rotate(-1.5deg)">오른쪽 이름이나 강줄기를 누르면<br>한 사람의 길만 따라가요 ↘</div></div>
         <svg class="tf-svg demo" width="1416" height="620" viewBox="0 0 1416 620" aria-label="AI 인재 이동 강줄기 도식"></svg>
         <div class="src">출처: 위키백과 Andrej Karpathy·Yann LeCun·Ilya Sutskever·OpenAI·Thinking Machines Lab·Character.ai·Inflection AI · Microsoft 공식 블로그 2024.3.19 · Wired 「8 Google Employees Invented Modern AI」 · 가로 위치(연도)는 대략적</div>`,
@@ -647,19 +649,22 @@
           const b = K.svg('tspan', {}, t); b.textContent = ' → ' + s.to;
           ends.push(eg);
         });
-        // station notes on top of the streams (paper halo keeps them legible)
-        const note = (t, yr, y, anchor) => { const n = K.svg('text', { class: 'stn', x: TX(yr), y, 'text-anchor': anchor || 'start' }, svg); n.textContent = t; };
-        note('메타 FAIR', 2014.7, 369);
-        note('테슬라 AI 총괄', 2018.4, 346);
-        note('Inflection', 2022.5, 461);
-        note('Character.AI', 2022.1, 517);
+        // station notes on top of the streams (paper halo keeps them legible).
+        // own = streams the note belongs to: it stays bright when one of them is selected,
+        // and sits just clear of that stream's 20px highlight band.
+        const notes = [];
+        const note = (t, yr, y, own) => { const n = K.svg('text', { class: 'stn', x: TX(yr), y }, svg); n.textContent = t; notes.push([n, own]); };
+        note('메타 FAIR', 2014.7, 362, [2]);
+        note('테슬라 AI 총괄', 2018.4, 339, [5]);
+        note('Inflection', 2022.5, 455, [1]);
+        note('Character.AI', 2022.1, 522, [0]);
         // springs + paper marker, drawn above the streams
         K.svg('circle', { class: 'spring', cx: TX(2010), cy: 70, r: 9 }, svg);
         K.svg('circle', { class: 'spring', cx: TX(2010), cy: 102, r: 13 }, svg);
         const sp1 = K.svg('text', { class: 'sp-t', x: TX(2010) + 16, y: 50 }, svg); sp1.textContent = '페이페이 리 연구실 (스탠퍼드)';
         const sp2 = K.svg('text', { class: 'sp-t', x: TX(2010) + 16, y: 145 }, svg); sp2.textContent = '힌턴 연구실 (토론토)';
         K.svg('circle', { class: 'mk', cx: TX(2017.2), cy: 186, r: 9 }, svg);
-        note('2017 트랜스포머 논문', 2017.5, 142);
+        note('2017 트랜스포머 논문', 2017.5, 142, [0, 7]);
 
         let sel = -1;
         function select(i) {
@@ -667,6 +672,7 @@
           el.classList.toggle('has-sel', sel >= 0);
           groups.forEach((g, k) => g.classList.toggle('sel', k === sel));
           ends.forEach((g, k) => g.classList.toggle('sel', k === sel));
+          notes.forEach(([n, own]) => n.classList.toggle('on', own.includes(sel)));
           if (sel < 0) { capHost.innerHTML = hintHTML; return; }
           const s = STREAMS[sel];
           capHost.innerHTML = (s.photo ? K.photo(s.photo, '', 'tilt-r') : '') + `<div class="txt">${s.cap}</div>`;

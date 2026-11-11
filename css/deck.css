@@ -1,3 +1,11 @@
+/* Handwriting font ships with the deck (unchanged Nanum Pen Script, SIL OFL 1.1 — assets/fonts/OFL-NanumPenScript.txt)
+   so an offline classroom PC draws the same widths as the design. */
+@font-face {
+  font-family: "Nanum Pen Script";
+  src: url("../assets/fonts/NanumPenScript-Regular.woff2") format("woff2");
+  font-display: swap;
+}
+
 /* Layout concept: one endless sheet of engineering graph paper. Every slide is a
    1600×900 viewfinder (crop marks) placed on it; sections are drawn regions joined
    by a pencil route shaped like ∞ — 1교시 loops left, 2교시 loops right.
@@ -34,6 +42,7 @@
   --c5: #b5372b;
   --shadow: 0 10px 26px rgba(27, 38, 48, 0.16);
   --hud-bg: rgba(237, 241, 234, 0.92);
+  --veil: rgba(237, 241, 234, 0.86);
 
   --font-display: "Hahmlet", "Nanum Myeongjo", "AppleMyungjo", "Batang", serif;
   --font-body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif;
@@ -65,6 +74,7 @@
     --c1: #e6eee8; --c2: #93b2ff; --c3: #5cc38a; --c4: #f0b23c; --c5: #ff7d6e;
     --shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
     --hud-bg: rgba(17, 27, 25, 0.92);
+    --veil: rgba(17, 27, 25, 0.86);
     color-scheme: dark;
   }
 }
@@ -82,6 +92,7 @@
   --c1: #e6eee8; --c2: #93b2ff; --c3: #5cc38a; --c4: #f0b23c; --c5: #ff7d6e;
   --shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
   --hud-bg: rgba(17, 27, 25, 0.92);
+  --veil: rgba(17, 27, 25, 0.86);
   color-scheme: dark;
 }
 
@@ -213,7 +224,7 @@ ol.dash > li::before { content: counter(n); position: absolute; left: 0; top: 0.
 
 /* quote */
 .quote { font-family: var(--font-display); font-weight: 500; font-size: 46px; line-height: 1.32; position: relative; padding-left: 0.2em; }
-.quote::before { content: "“"; position: absolute; left: -0.55em; top: -0.18em; font-size: 2.2em; color: var(--pen); font-family: var(--font-display); }
+.quote::before { content: "“"; position: absolute; left: -0.55em; top: -0.18em; font-size: 2.2em; color: var(--pen); font-family: "Hahmlet", Georgia, "Times New Roman", serif; }
 .quote cite { display: block; font-style: normal; font-family: var(--font-mono); font-size: 22px; color: var(--ink-2); margin-top: 16px; }
 
 /* big number */
@@ -322,3 +333,42 @@ svg.chart .hand { font-family: var(--font-hand); font-size: 32px; fill: var(--pe
 body[data-frame="finale"] #f-title .t-start, body[data-frame="finale-map"] #f-title .t-start { visibility: hidden; }
 #f-title .t-bye { visibility: hidden; }
 body[data-frame="finale"] #f-title .t-bye { visibility: visible; }
+
+/* ───────────── touch: bottom bar, table of contents, toast ───────────── */
+#touchbar { position: fixed; z-index: 22; left: 0; right: 0; bottom: 0; display: none; align-items: center; gap: 8px; padding: 8px max(10px, env(safe-area-inset-right, 0px)) calc(8px + env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px)); background: var(--hud-bg); border-top: 2px solid var(--ink); }
+body.touch #touchbar { display: flex; }
+body.touch #hud-bar, body.touch #hint, body.touch #minimap { display: none !important; }
+/* device-specific wording inside frames: "마우스를 올려" vs "손가락으로 눌러" */
+body.touch .if-mouse, body:not(.touch) .if-touch { display: none !important; }
+#touchbar button { flex: none; white-space: nowrap; font: 600 16px/1 var(--font-body); color: var(--ink); background: var(--paper); border: 2px solid var(--ink); border-radius: 9px 3px 9px 3px / 3px 9px 3px 9px; min-height: 44px; min-width: 52px; padding: 0 14px; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+#touchbar button:active { background: var(--hl-soft); }
+#touchbar button.on { background: var(--ink); color: var(--paper); }
+#touchbar #tb-next { background: var(--ink); color: var(--paper); }
+#touchbar #tb-next:active { background: var(--pen); }
+#tb-count { flex: 1 1 auto; min-width: 0; text-align: center; font: 13px var(--font-mono); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+#touchbar .tb-prog { position: absolute; left: 0; top: -2px; height: 3px; background: var(--pen); transition: width 0.3s; }
+@media (max-width: 360px) { #touchbar button { padding: 0 10px; font-size: 15px; min-width: 44px; } }
+
+#toc { position: fixed; z-index: 33; top: 0; right: 0; bottom: 0; width: min(420px, 100vw); display: flex; flex-direction: column; background: var(--paper-2); border-left: 2px solid var(--ink); transform: translateX(105%); transition: transform 0.3s ease; padding-top: env(safe-area-inset-top, 0px); }
+#toc.open { transform: none; box-shadow: var(--shadow); }
+#toc header { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 14px max(16px, env(safe-area-inset-right, 0px)) 12px 16px; border-bottom: 1px dashed var(--ink-3); }
+#toc header b { font: 800 22px var(--font-display); margin-right: 4px; }
+#toc .toc-meta { font: 12px var(--font-mono); color: var(--ink-2); margin-right: auto; }
+#toc header .hud-btn { font: 13px var(--font-body); padding: 6px 10px; min-height: 34px; }
+#toc .toc-list { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; touch-action: pan-y; padding: 6px max(8px, env(safe-area-inset-right, 0px)) calc(20px + env(safe-area-inset-bottom, 0px)) 8px; }
+.toc-sec { font: 12px var(--font-mono); letter-spacing: 0.06em; color: var(--ink-2); padding: 16px 10px 6px; }
+.toc-sec b { display: block; font: 800 18px var(--font-display); letter-spacing: 0; color: var(--ink); margin-top: 2px; }
+.toc-row { display: flex; align-items: baseline; gap: 10px; width: 100%; min-height: 40px; padding: 9px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font: 15px/1.35 var(--font-body); text-align: left; cursor: pointer; touch-action: manipulation; }
+.toc-row:hover { background: var(--paper-3); }
+.toc-row.cur { background: var(--hl-soft); }
+.toc-row .n { flex: none; width: 2.2em; font: 12px var(--font-mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.toc-row .t { flex: 1 1 auto; min-width: 0; }
+.toc-row .o { flex: none; font: 18px var(--font-hand); color: var(--pen); }
+
+.toast { position: fixed; z-index: 45; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); max-width: calc(100vw - 32px); background: var(--ink); color: var(--paper); font: 15px/1.4 var(--font-body); padding: 10px 16px; border-radius: 8px; text-align: center; transition: opacity 0.6s; pointer-events: none; }
+.toast.out { opacity: 0; }
+body.touch #hud-caption { font-size: clamp(22px, 5vw, 44px); left: max(16px, env(safe-area-inset-left, 0px)); top: calc(12px + env(safe-area-inset-top, 0px)); }
+body.touch #notes { z-index: 34; }
+
+#focus { position: fixed; z-index: 15; pointer-events: none; opacity: 0; transition: opacity 0.35s; box-shadow: 0 0 0 200vmax var(--veil); border-radius: 2px; }
+#focus.on { opacity: 1; }

@@ -110,7 +110,8 @@
   function mtWhen(m) {
     if (m <= 3.5) return { at: null, txt: '2023년 GPT-4 때 이미' };
     if (m > MT_MYTHOS.m) return { at: null, txt: '아직 잴 수 없음 (METR 과제로 재는 한계 너머)' };
-    if (m > 320) return { at: MT_MYTHOS.t - 0.15, txt: '2025.11 ~ 2026.3 사이', range: true };
+    // range: mark it at its start (the Opus 4.5 date); further right the marker would sit under the 'Opus 4.5' label
+    if (m > 320) return { at: MT[MT.length - 1].t, txt: '2025.11 ~ 2026.3 사이', range: true };
     for (let i = 0; i < MT.length - 1; i++) {
       const a = MT[i], b = MT[i + 1];
       if (m <= b.m) {
@@ -350,7 +351,7 @@
       notes: 'ChatGPT라는 출발 총성 이후 2년 동안 빅테크가 전부 뛰어들었습니다. 2023년 3월 14일에는 GPT-4와 Anthropic의 첫 Claude가 같은 날 나왔고, 구글은 Bard 시연 오답으로 망신당한 뒤 Gemini로 반격했고, Meta는 가중치를 통째로 공개하는 ‘오픈’ 전략으로 판을 흔들었습니다. 2024년 말에는 중국 DeepSeek가 아주 싼 비용으로 큰 모델을 내놓으며 뒤의 ‘생각하는 AI’ 장면(R1 충격)을 예고합니다.\n점을 클릭하면 아래에 한 줄 설명이 나옵니다. 추천 순서: GPT-4 → Claude(같은 날) → LLaMA → 이사회 사태 → o1 → DeepSeek-V3 (Bard 오답은 환각 장에서 봤습니다). 속이 빈 마름모는 모델이 아닌 ‘사건’입니다.\n질문: “레인 하나만 응원한다면 어느 회사? 왜?”',
       html: `
         <style>
-          #f-arms-race .ar-svg { position:absolute; left:92px; top:200px; overflow:visible; }
+          #f-arms-race .ar-svg { position:absolute; left:92px; top:212px; overflow:visible; }
           #f-arms-race .ar-svg text { font-family:var(--font-mono); fill:var(--ink-2); font-size:20px; }
           #f-arms-race .ar-svg .lane-name { font-family:var(--font-display); font-weight:800; font-size:30px; fill:var(--ink); }
           #f-arms-race .ar-svg .lane-sub { font-family:var(--font-mono); font-size:20px; fill:var(--ink-2); }
@@ -364,6 +365,8 @@
           #f-arms-race .ar-svg .it:focus { outline:none; }
           #f-arms-race .ar-svg .it:focus-visible .mk { stroke:var(--pen); stroke-width:5; }
           #f-arms-race .ar-svg .it .hit { fill:transparent; }
+          /* paper halo: the dotted year lines (2023, 2025) run through 'Bard 시연', 'o3 발표', 'DeepSeek-V3' */
+          #f-arms-race .ar-svg .it text { paint-order:stroke; stroke:var(--paper); stroke-width:6px; stroke-linejoin:round; }
           #f-arms-race .ar-svg .it .mk { fill:var(--ink); stroke:var(--ink); stroke-width:3; transition: r .2s; }
           #f-arms-race .ar-svg .it.ev .mk { fill:var(--paper); }
           #f-arms-race .ar-svg .it:hover .mk { fill:var(--hl-soft); }
@@ -379,7 +382,7 @@
         <h2 class="title">군비 경쟁: 모두가 뛰어들었다</h2>
         <div class="abs hand" style="right:96px;top:84px;font-size:40px;transform:rotate(-2deg)">점을 눌러 보세요 ↓</div>
         <div class="abs mono tiny muted" style="right:96px;top:140px">● 모델 출시 &nbsp; ◇ 사건</div>
-        <svg class="demo ar-svg" width="1416" height="476" viewBox="0 0 1416 476" aria-label="회사별 모델 출시 타임라인"></svg>
+        <svg class="demo ar-svg" width="1416" height="470" viewBox="0 0 1416 470" aria-label="회사별 모델 출시 타임라인"></svg>
         <div class="ar-info demo" aria-live="polite">
           <div class="ar-date"></div>
           <div><div class="ar-name"></div><div class="ar-desc"></div></div>
@@ -391,13 +394,15 @@
         // years
         [2023, 2024, 2025].forEach((y) => {
           const x = arX(y);
-          K.svg('line', { class: 'yl', x1: x, y1: 34, x2: x, y2: arY(5) + 34 }, g0);
+          // the svg sits 12px lower than the title's line box so the year labels never touch the title;
+          // the tick lines stop above the start-gun note, which moved up by the same amount
+          K.svg('line', { class: 'yl', x1: x, y1: 34, x2: x, y2: arY(5) + 20 }, g0);
           const t = K.svg('text', { class: 'yr', x: x + 8, y: 22 }, g0); t.textContent = y;
         });
         // start gun
         const xs = arX(dec(2022, 11, 30));
-        K.svg('line', { class: 'start', x1: xs, y1: arY(0) + 14, x2: xs, y2: arY(5) + 30 }, g0);
-        const ts = K.svg('text', { class: 'hnd', x: xs + 10, y: arY(5) + 64 }, g0); ts.textContent = '↑ 출발 총성';
+        K.svg('line', { class: 'start', x1: xs, y1: arY(0) + 14, x2: xs, y2: arY(5) + 22 }, g0);
+        const ts = K.svg('text', { class: 'hnd', x: xs + 10, y: arY(5) + 52 }, g0); ts.textContent = '↑ 출발 총성';
         // same day band (GPT-4 & Claude, 2023-03-14)
         const xd = arX(dec(2023, 3, 14));
         K.svg('rect', { class: 'same', x: xd - 9, y: arY(0) - 4, width: 18, height: arY(2) - arY(0) + 8, rx: 6 }, g0);
@@ -456,7 +461,11 @@
           #f-nobel-2024 .nb-photos { display:flex; gap:26px; align-items:flex-start; margin:30px 0 22px 10px; }
           #f-nobel-2024 .nb-init { width:150px; display:flex; flex-direction:column; align-items:center; gap:4px; margin-top:34px; }
           #f-nobel-2024 .nb-init svg circle { fill:none; stroke:var(--ink); stroke-width:3.5; }
-          #f-nobel-2024 .nb-init svg text { font-family:var(--font-display); font-weight:800; font-size:48px; fill:var(--ink); }
+          /* initials are HTML, not SVG <text>: SVG text first laid out while the canvas is zoomed far out
+             can stay invisible when the web font never arrives (offline classroom PC) */
+          #f-nobel-2024 .nb-ring { position:relative; width:120px; height:120px; }
+          #f-nobel-2024 .nb-ring svg { position:absolute; left:0; top:0; }
+          #f-nobel-2024 .nb-ring b { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding-top:4px; font-family:var(--font-display); font-weight:800; font-size:48px; line-height:1; color:var(--ink); }
           #f-nobel-2024 .nb-init span { font-family:var(--font-hand); font-size:32px; color:var(--ink); white-space:nowrap; }
           #f-nobel-2024 .nb-div { position:absolute; left:772px; top:228px; width:3px; height:410px; background:var(--ink-3); border-radius:2px; transform:rotate(.6deg); }
           #f-nobel-2024 .nb-grid rect { fill:none; stroke:var(--ink-3); stroke-width:1.5; }
@@ -482,14 +491,14 @@
             ${Kit.photo('hassabis', '데미스 허사비스', 'sm', '--w:186px;--tilt:-1.5deg')}
             ${Kit.photo('jumper', '존 점퍼', 'sm tilt-r', '--w:186px')}
             <div class="nb-init">
-              <svg viewBox="0 0 120 120" width="120" height="120" aria-hidden="true"><circle class="nb-c" cx="60" cy="60" r="52"/><text x="60" y="77" text-anchor="middle">DB</text></svg>
+              <div class="nb-ring"><svg viewBox="0 0 120 120" width="120" height="120" aria-hidden="true"><circle class="nb-c" cx="60" cy="60" r="52"/></svg><b>DB</b></div>
               <span>데이비드 베이커</span>
             </div>
           </div>
           <div class="nb-why"><span class="mark">AlphaFold</span> 단백질 구조 예측 ½<br>+ 단백질 설계(베이커) ½</div>
         </div>
         <div class="abs row" style="left:92px;top:680px;gap:40px;align-items:center">
-          <div class="stack nb-count" style="gap:6px;width:400px">
+          <div class="stack nb-count" style="gap:6px;width:440px">
             <div class="mono tiny muted">AlphaFold가 예측한 단백질 구조</div>
             <b class="nb-n" style="white-space:nowrap">2억+</b>
             <div class="tiny muted">2022.7 · 190개국 50만 명 이상이 사용</div>
@@ -553,7 +562,7 @@
           #f-reasoning-agents .ra-svg .b { fill:var(--ink); }
           #f-reasoning-agents .ra-svg .b.hi { fill:var(--hl); stroke:var(--ink); stroke-width:3; }
           #f-reasoning-agents .mt text { font-size:20px; }
-          #f-reasoning-agents .mt .lab { fill:var(--ink); font-size:20px; paint-order:stroke; stroke:var(--paper); stroke-width:6px; stroke-linejoin:round; }
+          #f-reasoning-agents .mt .lab { fill:var(--ink); font-size:20px; paint-order:stroke; stroke:var(--paper); stroke-width:10px; stroke-linejoin:round; }
           #f-reasoning-agents .mt .ref { fill:none; stroke:var(--ink-3); stroke-width:3; stroke-dasharray:9 8; }
           #f-reasoning-agents .mt .meas { fill:none; stroke:var(--ink); stroke-width:4.5; stroke-linejoin:round; }
           #f-reasoning-agents .mt .myth { fill:var(--paper); stroke:var(--ink); stroke-width:3; stroke-dasharray:4 4; }
@@ -672,6 +681,8 @@
         const tl = K.svg('line', { class: 'task', x1: MG.l, x2: MG.w - MG.r }, gTask);
         const dl = K.svg('line', { class: 'drop' }, gTask);
         const hc = K.svg('circle', { class: 'hit', r: 9 }, gTask);
+        // point labels go back on top: their paper halo keeps them readable when the task line crosses them
+        mt.querySelectorAll('text.lab').forEach((t) => mt.appendChild(t));
         const range = el.querySelector('#ra-task'), out = el.querySelector('.ra-out'), res = el.querySelector('.ra-res');
         const cave = el.querySelector('.ra-cave');
         const toMin = (v) => Math.exp((v / 1000) * Math.log(MG.ymax));

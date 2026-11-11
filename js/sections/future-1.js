@@ -5,6 +5,34 @@
   const esc = (s) => Kit.escape(s);
   const won = (v) => Math.round(v).toLocaleString('ko-KR');
 
+  /* Nanum Pen Script is a narrow face. On an offline classroom PC (Google Fonts blocked, no local copy, e.g. Windows)
+     the hand notes fall back to a Korean gothic (Malgun Gothic) about 1.3–1.5× wider and ran into chart lines, the title
+     and the next box (sticky over the title, ‘경력자는…’ across the line, a card out of its bin, an ellipsized caption).
+     Measure the hand font in use and expose the shrink factor as --hk; the hand sizes below are calc(Npx * var(--hk, 1)),
+     so with the pen font nothing changes (same approach as speaker.js). */
+  const HAND_SAMPLE = '가나다라마바사아자차', PEN_EM = 6.73; // HAND_SAMPLE's width in Nanum Pen Script, in em
+  const handFrames = [];
+  const handMeasure = () => {
+    const fam = getComputedStyle(document.documentElement).getPropertyValue('--font-hand').trim();
+    if (!fam) return;
+    const set = () => {
+      const c = document.createElement('canvas').getContext('2d');
+      c.font = `100px ${fam}`;
+      const w = c.measureText(HAND_SAMPLE).width / 100;
+      const k = w > 0 && PEN_EM / w < 0.95 ? Kit.clamp(PEN_EM / w, 0.6, 1) : 1;
+      handFrames.forEach((f) => f.style.setProperty('--hk', k.toFixed(3)));
+    };
+    try { document.fonts.load(`100px ${fam}`, HAND_SAMPLE).then(set, set); } catch (e) { set(); }
+  };
+  function handFit(el) {
+    handFrames.push(el);
+    if (handFrames.length === 1 && document.fonts) {
+      if (document.fonts.ready) document.fonts.ready.then(handMeasure);
+      document.fonts.addEventListener('loadingdone', handMeasure);
+    }
+    handMeasure();
+  }
+
   /* ───────────────────── 1. task-sorter data ───────────────────── */
   const BINS = [
     { name: 'AI가 대부분', sub: '사람은 확인만' },
@@ -187,7 +215,7 @@
           #f-task-sorter .ts-wrap{position:absolute;left:92px;right:92px;top:62px;bottom:66px;display:grid;grid-template-columns:330px 1fr;gap:44px}
           #f-task-sorter .ts-side{display:flex;flex-direction:column;gap:18px}
           #f-task-sorter .ts-side .title{font-size:68px;line-height:1.12;margin:4px 0 10px}
-          #f-task-sorter .ts-hand{transform:rotate(-3deg);font-size:42px;margin:6px 0 4px}
+          #f-task-sorter .ts-hand{transform:rotate(-3deg);font-size:calc(42px * var(--hk, 1));margin:6px 0 4px}
           #f-task-sorter .ts-work{display:flex;flex-direction:column;gap:26px;min-height:0}
           #f-task-sorter .ts-pool{position:relative;border:3px dashed var(--ink-3);border-radius:16px 6px 14px 5px/6px 14px 5px 16px;padding:30px 22px 26px;display:flex;flex-wrap:wrap;gap:18px 16px;align-content:flex-start;min-height:120px;transition:box-shadow .2s}
           #f-task-sorter .ts-lab{position:absolute;top:-16px;left:22px;background:var(--paper);padding:0 10px;font-family:var(--font-mono);font-size:20px;color:var(--ink-2);line-height:1.4}
@@ -204,14 +232,19 @@
           #f-task-sorter .ts-card.anim{transition:transform .45s cubic-bezier(.2,.8,.2,1)}
           #f-task-sorter .ts-card.drag{cursor:grabbing;z-index:30;box-shadow:var(--shadow);transition:none}
           #f-task-sorter .ts-card .ts-t{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:0 10px}
-          #f-task-sorter .ts-card .mine{font-family:var(--font-hand);font-weight:400;font-size:28px;color:var(--pen);white-space:nowrap}
+          #f-task-sorter .ts-card .mine{font-family:var(--font-hand);font-weight:400;font-size:calc(28px * var(--hk, 1));color:var(--pen);white-space:nowrap}
           #f-task-sorter .ts-card .why{display:none;font-weight:400;font-size:20px;line-height:1.3;color:var(--ink-2)}
-          #f-task-sorter .ts-bin::after{content:"여기에 놓기";position:absolute;left:0;right:0;bottom:14px;text-align:center;font-family:var(--font-hand);font-size:34px;color:var(--ink-3);pointer-events:none}
+          #f-task-sorter .ts-bin::after{content:"여기에 놓기";position:absolute;left:0;right:0;bottom:14px;text-align:center;font-family:var(--font-hand);font-size:calc(34px * var(--hk, 1));color:var(--ink-3);pointer-events:none}
           #f-task-sorter.ts-on .ts-bin::after, #f-task-sorter .ts-bin:has(.ts-card:nth-child(5))::after{content:none}
           #f-task-sorter.ts-on .ts-pool{display:none}
           #f-task-sorter.ts-on .ts-card{width:100%;cursor:default;--r:0deg !important}
           #f-task-sorter.ts-on .ts-card .why{display:block}
           #f-task-sorter.ts-on .ts-bin.b0 .ts-card{border-style:dashed}
+          #f-task-sorter .ts-pool:not(:has(.ts-card)){min-height:56px;padding-top:0;padding-bottom:0}
+          #f-task-sorter .ts-bin:has(.ts-card:nth-child(7)) .ts-drop{gap:8px}
+          #f-task-sorter .ts-bin:has(.ts-card:nth-child(7)) .ts-card{font-size:23px;padding:6px 13px}
+          #f-task-sorter .ts-bin:has(.ts-card:nth-child(10)) .ts-drop{gap:6px}
+          #f-task-sorter .ts-bin:has(.ts-card:nth-child(10)) .ts-card{font-size:21px;padding:4px 12px}
         </style>
         <div class="ts-wrap">
           <div class="ts-side">
@@ -229,6 +262,7 @@
         </div>
         <div class="src">제안 답은 강사의 의견입니다 · 참고: Anthropic Economic Index(2025.2) — Claude 대화의 57%는 ‘함께 하기’(증강), 43%는 ‘맡기기’(자동화)</div>`,
       init(el, K) {
+        handFit(el);
         const stage = el.querySelector('.stage');
         const work = el.querySelector('.ts-work');
         const pool = el.querySelector('.ts-pool');
@@ -341,7 +375,7 @@
           #f-jobs-history .jh-chart text{font-size:20px}
           #f-jobs-history .jh-chart .lab{font-family:var(--font-body);font-size:24px;font-weight:600;fill:var(--ink)}
           #f-jobs-history .jh-chart .lab.pen{fill:var(--pen)}
-          #f-jobs-history .jh-chart .hnote{font-family:var(--font-hand);font-size:36px;fill:var(--pen)}
+          #f-jobs-history .jh-chart .hnote{font-family:var(--font-hand);font-size:calc(36px * var(--hk, 1));fill:var(--pen)}
           #f-jobs-history .jh-q{display:none}
           #f-jobs-history.current.q0 .jh-q{display:inline}
           #f-jobs-history.current.q0 .jh-a{display:none}
@@ -368,6 +402,7 @@
         <div class="abs jh-gone" data-step="3"><span class="mono tiny muted" style="white-space:nowrap">대비</span><span>물론 정말로 사라진 일도 있다 — <b>엘리베이터 운전원</b> <span class="muted">(1950년대 자동 엘리베이터)</span> · <b>전화교환원</b> <span class="muted">(자동 교환기 → 대신 접수원이 늘었다)</span></span></div>
         <div class="src">출처: J. Bessen, “Toil and Technology”, IMF F&amp;D 2015.3 (Chart 1을 다시 그림, 그래프 판독 근삿값) · 2025년 수치·전망: 미국 노동통계국 OOH · 엘리베이터: Wikipedia</div>`,
       init(el, K) {
+        handFit(el);
         const svg = el.querySelector('.jh-chart');
         const X0 = 96, X1 = 905, Y0 = 500, Y1 = 26, yr0 = 1970, yr1 = 2025, vmax = 700;
         const X = (y) => X0 + ((y - yr0) / (yr1 - yr0)) * (X1 - X0);
@@ -406,7 +441,7 @@
         S('path', { class: 'ln', d: `M${X(2010)},${Y(578)} L${X(2025)},${Y(yB)}`, 'stroke-dasharray': '2 11', 'stroke-width': 4 }, g3);
         S('circle', { class: 'dot', cx: X(2025), cy: Y(yB), r: 8 }, g3);
         S('text', { x: X(2025) - 16, y: Y(yB) + 38, 'text-anchor': 'end', style: 'fill:var(--ink);font-weight:600' }, g3).textContent = '2025년 33.9만 명';
-        const rv = S('text', { class: 'hnote', x: X(2011), y: Y(232), style: 'font-size:32px' }, g3);
+        const rv = S('text', { class: 'hnote', x: X(2011), y: Y(232), style: 'font-size:calc(32px * var(--hk, 1))' }, g3);
         rv.innerHTML = `<tspan x="${X(2011)}">그 뒤 반전:</tspan><tspan x="${X(2011)}" dy="36">모바일 뱅킹 시대</tspan><tspan x="${X(2011)}" dy="36">→ 10년간 −13% 전망</tspan>`;
         S('text', { x: X(2017.75), y: Y1 + 26, 'text-anchor': 'middle', style: 'font-size:20px' }, g3).textContent = '다른 통계(BLS)';
 
@@ -477,7 +512,7 @@
               <div class="up"><h3>가장 빨리 <span class="good">느는</span> 직업</h3><ol>
                 <li><b>1</b>빅데이터 전문가</li><li><b>2</b>핀테크(금융+IT) 엔지니어</li><li><b>3</b>AI·머신러닝 전문가</li><li><b>4</b><span><span class="mark">소프트웨어·앱 개발자</span></span></li><li><b>5</b>보안 관리 전문가</li></ol></div>
               <div class="down"><h3>가장 빨리 <span class="bad">주는</span> 직업</h3><ol>
-                <li><b>1</b>우편 사무원</li><li><b>2</b><span>은행 창구 직원 <span class="hand" style="font-size:30px">← 방금 그 직업</span></span></li><li><b>3</b>데이터 입력원</li><li><b>4</b>계산원·매표원</li><li><b>5</b>행정 비서</li></ol></div>
+                <li><b>1</b>우편 사무원</li><li><b>2</b><span>은행 창구 직원 <span class="hand" style="font-size:calc(30px * var(--hk, 1))">← 방금 그 직업</span></span></li><li><b>3</b>데이터 입력원</li><li><b>4</b>계산원·매표원</li><li><b>5</b>행정 비서</li></ol></div>
             </div>
             <div class="wf-skills">
               <h3>기업이 꼽은 핵심 역량 <span class="mono tiny muted" style="font-weight:400">(26개 중 순위 · 꼽은 기업 비율)</span></h3>
@@ -487,6 +522,7 @@
         </div>
         <div class="src">출처: World Economic Forum, Future of Jobs Report 2025 (2025.1) — 2025→2030 기업 설문 전망, Figure 2.2(빨리 느는·주는 직업)·Figure 3.3(핵심 역량)</div>`,
       init(el, K, f) {
+        handFit(el);
         const svg = el.querySelector('.wf-chart');
         const S = K.svg;
         const defs = S('defs', {}, svg);
@@ -531,7 +567,7 @@
         // skills list
         const SK = [[1, '분석적 사고', 69], [2, '회복탄력성·유연성', 67], [3, '리더십·사회적 영향력', 61], [4, '창의적 사고', 57], [0], [11, 'AI·빅데이터', 45], [23, '프로그래밍', 17]];
         el.querySelector('.wf-sk').innerHTML = SK.map(([r, n, v]) => (r === 0 ? '<div class="sk gap"></div>' :
-          `<div class="sk${r === 23 ? ' prog' : ''}"><span class="r">${r}</span><span>${n}</span><span class="bw"><i style="width:${v * 3.3}px"></i>${v}%${r === 23 ? '<span class="hand" style="font-size:30px;margin-left:6px">생각보다 낮다?</span>' : ''}</span></div>`)).join('');
+          `<div class="sk${r === 23 ? ' prog' : ''}"><span class="r">${r}</span><span>${n}</span><span class="bw"><i style="width:${v * 3.3}px"></i>${v}%${r === 23 ? '<span class="hand" style="font-size:calc(30px * var(--hk, 1));margin-left:6px">생각보다 낮다?</span>' : ''}</span></div>`)).join('');
       },
       enter(el, K, f) { f._wfStart && f._wfStart(); },
       leave(el, K, f) { f._wfEnd && f._wfEnd(); },
@@ -564,7 +600,7 @@
           #f-entry-level .el-chart .end2{font-family:var(--font-mono);font-weight:600;font-size:30px}
           #f-entry-level .el-chart .young{stroke:var(--bad);stroke-width:5.5}
           #f-entry-level .el-concl{left:92px;right:92px;top:736px;display:flex;align-items:baseline;gap:22px;font-family:var(--font-display);font-weight:800;font-size:44px}
-          #f-entry-level .el-concl .hand{font-size:52px;font-weight:400}
+          #f-entry-level .el-concl .hand{font-size:calc(52px * var(--hk, 1));font-weight:400}
         </style>
         <div class="el-grid">
           <div class="el-left">
@@ -588,6 +624,7 @@
         <div class="abs el-concl" data-step="2">결론: <span class="mark">신입의 기준이 올라간다</span><span class="hand">→ 그럼 지금부터 무엇을?</span></div>
         <div class="src">출처: Brynjolfsson 외, “Canaries in the Coal Mine?” Stanford DEL(2025.8 첫판·2026.8 개정판), ADP 급여 데이터 — 그래프는 Fig. B.3을 다시 그림(판독 근삿값), 인과 증명 아님 · 한국: 한국은행 BOK 이슈노트(2026.8.18, 청년 = 15–29세, 2022.6→2026.6) · 한국노동연구원 「최근 소프트웨어 개발자 취업자 수 및 직무 변화」(2025.12)</div>`,
       init(el, K, f) {
+        handFit(el);
         const svg = el.querySelector('.el-chart');
         const S = K.svg;
         const X0 = 64, X1 = 760, Y0 = 520, Y1 = 30, m1 = 65, vmin = 75, vmax = 120;
@@ -621,8 +658,8 @@
         S('text', { class: 'end2', x: X(65) + 18, y: Y(114.4) + 28, style: 'fill:var(--ink)' }, lab).textContent = '+14%';
         S('text', { class: 'end', x: X(65) + 18, y: Y(81.3) - 8, style: 'fill:var(--bad)' }, lab).textContent = '22–25세';
         S('text', { class: 'end2', x: X(65) + 18, y: Y(81.3) + 28, style: 'fill:var(--bad)' }, lab).textContent = '약 −20%';
-        S('text', { class: 'hand', x: X(24), y: Y(77.2), style: 'font-size:36px' }, g).textContent = '꺾인 건 신입(22–25세)';
-        S('text', { class: 'hand', x: X(30), y: Y(111.5), style: 'font-size:32px' }, g).textContent = '경력자는 오히려 늘었다';
+        S('text', { class: 'hand', x: X(24), y: Y(77.2), style: 'font-size:calc(36px * var(--hk, 1))' }, g).textContent = '꺾인 건 신입(22–25세)';
+        S('text', { class: 'hand', x: X(28), y: Y(111.5), style: 'font-size:calc(32px * var(--hk, 1))' }, g).textContent = '경력자는 오히려 늘었다';
         const anim = { t0: null, on: false };
         const setP = (p) => cr.setAttribute('width', 920 * p);
         f._elStart = () => { anim.t0 = null; anim.on = true; setP(0.08); };
@@ -650,7 +687,8 @@
           #f-software-30 .sw-grid{position:absolute;left:92px;right:92px;top:234px;display:grid;grid-template-columns:330px 1fr;gap:48px}
           #f-software-30 .sw-left{display:flex;flex-direction:column;gap:10px;padding-top:14px}
           #f-software-30 .sw-left .photo{--w:250px;margin-left:24px}
-          #f-software-30 .sw-q{font-size:40px;line-height:1.15;margin-top:18px}
+          #f-software-30 .photo figcaption{font-size:calc(38px * var(--hk, 1))}
+          #f-software-30 .sw-q{font-size:calc(40px * var(--hk, 1));line-height:1.15;margin-top:18px;word-break:keep-all}
           #f-software-30 .sw-right{display:flex;flex-direction:column;gap:12px;min-width:0}
           #f-software-30 .sw-tabs{display:flex;gap:14px}
           #f-software-30 .sw-tab{display:flex;align-items:baseline;gap:12px;padding:8px 18px}
@@ -689,6 +727,7 @@
         <div class="abs sw-vibe"><b class="mono" style="white-space:nowrap">2025.2</b><span>카르파시가 ‘<b>바이브 코딩</b>’이라는 말을 만들었다: “분위기에 몸을 맡기고, 코드가 있다는 것조차 잊어라” → Collins 사전 2025 올해의 단어</span></div>
         <div class="src">출처: Karpathy “Software 2.0”(2017.11) · YC 강연(2025.6.17) · X 게시물(2023.1.24, Quote Investigator 확인 / 2025.2.2) · Collins(2025.11.6) · 2.0·3.0 결과는 예시</div>`,
       init(el, K) {
+        handFit(el);
         const term = el.querySelector('.sw-term');
         const tests = el.querySelector('.sw-tests');
         const tabs = Array.from(el.querySelectorAll('.sw-tab'));
@@ -737,10 +776,10 @@
       html: `
         <style>
           #f-vibe-coding .vc-top{position:absolute;left:92px;right:92px;top:58px;display:flex;justify-content:space-between;align-items:flex-start}
-          #f-vibe-coding .vc-hand{transform:rotate(-3deg);text-align:right;font-size:50px;margin-top:6px}
+          #f-vibe-coding .vc-hand{transform:rotate(-3deg);text-align:right;font-size:calc(50px * var(--hk, 1));margin-top:6px}
           #f-vibe-coding .vc-real{left:704px;top:44px;width:500px;padding:12px 20px 14px;font-family:var(--font-body);font-size:20px;line-height:1.3;--tilt:-1.5deg}
           #f-vibe-coding .vc-real .mono{font-size:20px}
-          #f-vibe-coding .vc-real b{display:block;font-family:var(--font-hand);font-weight:400;font-size:36px;line-height:1.15;margin:2px 0 4px}
+          #f-vibe-coding .vc-real b{display:block;font-family:var(--font-hand);font-weight:400;font-size:calc(36px * var(--hk, 1));line-height:1.15;margin:2px 0 4px}
           #f-vibe-coding .vc-bar{position:absolute;left:92px;right:92px;top:196px;display:flex;align-items:center;gap:12px}
           #f-vibe-coding .vc-req{font-size:22px;padding:8px 16px}
           #f-vibe-coding .vc-stages{margin-left:auto;display:flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:20px;color:var(--ink-3)}
@@ -748,7 +787,7 @@
           #f-vibe-coding .vc-stages .chip.done{color:var(--ink);border-color:var(--ink)}
           #f-vibe-coding .vc-stages .chip.on{background:var(--hl);color:var(--sticky-ink);border-color:var(--ink)}
           #f-vibe-coding .vc-main{position:absolute;left:92px;right:92px;top:266px;height:552px;display:grid;grid-template-columns:850px 1fr;gap:30px}
-          #f-vibe-coding .vc-term{font-size:20px;line-height:1.48;padding:18px 22px;height:552px;overflow:hidden;white-space:pre}
+          #f-vibe-coding .vc-term{font-size:20px;line-height:1.48;padding:18px 22px;height:552px;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;touch-action:pan-y;scrollbar-width:thin;scrollbar-color:var(--term-dim) transparent;white-space:pre}
           #f-vibe-coding .vc-tw{position:relative;min-width:0}
           #f-vibe-coding .vc-fade{position:absolute;left:0;right:0;top:0;height:64px;border-radius:10px 10px 0 0;background:linear-gradient(var(--term-bg) 35%,transparent);pointer-events:none;opacity:0;transition:opacity .2s}
           #f-vibe-coding .vc-tw.sc .vc-fade{opacity:1}
@@ -767,7 +806,7 @@
           #f-vibe-coding .vc-url{display:flex;justify-content:space-between;align-items:center;border-bottom:2.5px solid var(--ink);padding:8px 14px;font-family:var(--font-mono);font-size:20px;color:var(--ink-2)}
           #f-vibe-coding .vc-url .tag{font-size:20px;border:1.5px dashed var(--ink-3);padding:0 8px;border-radius:4px}
           #f-vibe-coding .vc-app{flex:1;padding:20px 22px;display:flex;flex-direction:column;gap:14px;min-height:0}
-          #f-vibe-coding .vc-wait{flex:1;display:none;flex-direction:column;align-items:center;justify-content:center;gap:16px;color:var(--ink-3);font-family:var(--font-hand);font-size:40px}
+          #f-vibe-coding .vc-wait{flex:1;display:none;flex-direction:column;align-items:center;justify-content:center;gap:16px;color:var(--ink-3);font-family:var(--font-hand);font-size:calc(40px * var(--hk, 1))}
           #f-vibe-coding .vc-wait i{display:block;height:14px;background:var(--paper-3);border-radius:3px}
           #f-vibe-coding.vc-run .vc-app{display:none}
           #f-vibe-coding.vc-run .vc-wait{display:flex}
@@ -805,6 +844,7 @@
         </div>
         <div class="src">※ 시뮬레이션: 실제 AI를 부르지 않고 미리 짠 각본을 재생합니다(미니 앱은 진짜로 동작) · 참고: GitHub Octoverse 2026(2026.10.28) — 2026년 9월 PR(코드 변경 요청)의 40% 이상이 AI 에이전트 초안으로 시작 · 진짜 사례: GitHub jay-jang(2026.6–10 공개 레포 11개)</div>`,
       init(el, K, f) {
+        handFit(el);
         const term = el.querySelector('.vc-term');
         const appBox = el.querySelector('.vc-app');
         const chips = Array.from(el.querySelectorAll('.vc-stages .chip'));
@@ -903,6 +943,7 @@
           return `   ${t}`;
         }
         function scrollEnd() { term.scrollTop = term.scrollHeight; term.parentNode.classList.toggle('sc', term.scrollTop > 2); }
+        term.addEventListener('scroll', () => term.parentNode.classList.toggle('sc', term.scrollTop > 2)); // wheel/swipe up to read the lines that scrolled off
         function addLine(L, text) {
           const d = document.createElement('div');
           d.className = 'vl k-' + L[1];
@@ -936,6 +977,19 @@
         }
         reqs.forEach((b) => b.addEventListener('click', () => start(+b.dataset.r)));
         f._vcFinish = () => { if (R.running) renderAll(R.s); apps.forEach((a) => a.settle()); };
+        // the title must end before the sticky note (left:704px): a wider fallback serif (Batang/AppleMyungjo on an
+        // offline PC) ran its last letter under the note. Shrinks only then; with Hahmlet it ends near x=665.
+        const ttl = el.querySelector('.vc-top .title'), TTL_MAX = 688;
+        f._vcFit = () => {
+          ttl.style.fontSize = '';
+          const sr = el.querySelector('.stage').getBoundingClientRect(), k = sr.width / 1600;
+          if (!k) return;
+          const rg = document.createRange(); rg.selectNodeContents(ttl);
+          const rr = rg.getBoundingClientRect(), l = (rr.left - sr.left) / k, r = (rr.right - sr.left) / k;
+          if (r > TTL_MAX && r > l) ttl.style.fontSize = (parseFloat(getComputedStyle(ttl).fontSize) * (TTL_MAX - l) / (r - l)).toFixed(1) + 'px';
+        };
+        f._vcFit();
+        if (document.fonts) { if (document.fonts.ready) document.fonts.ready.then(f._vcFit); document.fonts.addEventListener('loadingdone', f._vcFit); }
 
         K.loop(el, (t, dt) => {
           apps.forEach((a) => a.tick(dt));
@@ -961,6 +1015,7 @@
         });
         renderAll(0);
       },
+      enter(el, K, f) { f._vcFit && f._vcFit(); },
       leave(el, K, f) { f._vcFinish && f._vcFinish(); },
     },
   ]);

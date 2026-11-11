@@ -6,6 +6,30 @@
 
   const fmt = (n) => Math.round(n).toLocaleString('ko-KR');
 
+  /* Fallback-font safety: when the web fonts can't load (offline PC without Nanum Pen / Hahmlet), the system
+     fonts are wider. These shrink a line or a box only while its text really overflows, so with the web fonts
+     they change nothing. Re-run after fonts finish loading and on enter. */
+  function resetFont(n) {
+    if (n.dataset.fs0 == null) n.dataset.fs0 = n.style.fontSize; // keep an inline size from the html
+    n.style.fontSize = n.dataset.fs0;
+  }
+  function fitLine(n, minPx) {
+    resetFont(n);
+    let px = parseFloat(getComputedStyle(n).fontSize);
+    while (px > minPx && n.scrollWidth > n.clientWidth + 1) { px -= 1; n.style.fontSize = px + 'px'; }
+  }
+  function fitBox(n, maxH, minPx) {
+    resetFont(n);
+    let px = parseFloat(getComputedStyle(n).fontSize);
+    while (px > minPx && (n.offsetHeight > maxH + 1 || n.scrollWidth > n.clientWidth + 1)) { px -= 2; n.style.fontSize = px + 'px'; }
+  }
+  function onFonts(fn) {
+    fn();
+    if (!document.fonts) return;
+    if (document.fonts.ready) document.fonts.ready.then(fn);
+    document.fonts.addEventListener && document.fonts.addEventListener('loadingdone', fn);
+  }
+
   /* ───────── y1989 helpers: a handwritten "3" rasterised from a pen stroke, and 3×3 convolution ───────── */
   function catmull(P, step) {
     const out = [];
@@ -250,7 +274,7 @@
               <button class="chip on" data-k="v">세로선 찾기</button>
               <button class="chip" data-k="h">가로선 찾기</button>
               <button class="chip" data-k="e">윤곽선 찾기</button>
-              <span class="hand push" style="font-size:36px;margin-left:auto">숫자 위에 마우스를 올려 봐요</span>
+              <span class="hand push if-mouse" style="font-size:36px;margin-left:auto">숫자 위에 마우스를 올려 봐요</span><span class="hand push if-touch" style="font-size:36px;margin-left:auto">숫자를 손가락으로 눌러 봐요</span>
             </div>
           </div>
         </div>
@@ -367,7 +391,7 @@
           draw();
         }
         el.querySelectorAll('.chip[data-k]').forEach((c) => c.addEventListener('click', () => setFilter(c.dataset.k)));
-        cv.addEventListener('pointermove', (e) => {
+        const onPoint = (e) => {
           const pt = K.pt(e, cv);
           let cx = -1, cy = -1;
           if (pt.x >= IX && pt.x < IX + 28 * CELL && pt.y >= IY && pt.y < IY + 28 * CELL) {
@@ -377,8 +401,10 @@
           }
           if (cx < 0) { if (hover) { hover = null; dirty = true; } return; }
           if (!hover || hover.x !== cx || hover.y !== cy) { hover = { x: cx, y: cy }; s = 676; dirty = true; draw(); }
-        });
-        cv.addEventListener('pointerleave', () => { hover = null; dirty = true; draw(); });
+        };
+        cv.addEventListener('pointermove', onPoint);
+        cv.addEventListener('pointerdown', onPoint);
+        cv.addEventListener('pointerleave', (e) => { if (e.pointerType === 'touch') return; hover = null; dirty = true; draw(); });
         K.loop(el, (t, dt) => {
           if (!hover) {
             if (s < 676) { s = Math.min(676, s + dt * 150); dirty = true; if (s >= 676) hold = 2.4; }
@@ -550,6 +576,9 @@
         </div>
         <div class="src">출처: Hinton·Osindero·Teh 2006 (Neural Computation) · Wikipedia ‘ImageNet’ (1,400만+ 장, 21,841 범주, 167개국 4만 9천 명이 후보 1.6억 장을 걸러냄, ILSVRC 1,000 범주·128만 장) · Deng et al. CVPR 2009</div>`,
       init(el, K) {
+        const fitCaps = () => el.querySelectorAll('.photo figcaption').forEach((c) => fitLine(c, 20));
+        onFonts(fitCaps);
+        this._fit = fitCaps;
         const COLS = 100, ROWS = 40, CELL = 10.4, W = COLS * CELL, H = ROWS * CELL;
         const { ctx } = K.canvas(el.querySelector('.grid-host'), W, H);
         const counter = el.querySelector('.c-img');
@@ -605,7 +634,7 @@
         K.onTheme(draw);
         draw();
       },
-      enter() { this._play && this._play(); },
+      enter() { this._fit && this._fit(); this._play && this._play(); },
       leave() { this._finish && this._finish(); },
     },
 
@@ -624,6 +653,7 @@
           #f-y2012 svg.chart .old { fill: var(--ink-3); }
           #f-y2012 svg.chart .human { stroke: var(--pen); stroke-width: 3.5; stroke-dasharray: 12 8; }
           #f-y2012 svg.chart .val { font-size: 23px; fill: var(--ink); font-weight: 600; }
+          #f-y2012 svg.chart .halo { paint-order: stroke; stroke: var(--paper); stroke-width: 6px; stroke-linejoin: round; }
           #f-y2012 svg.chart .yr { font-size: 21px; fill: var(--ink-2); }
           #f-y2012 svg.chart .yr.on { fill: var(--ink); font-weight: 600; }
           #f-y2012 svg.chart .pen-t { fill: var(--pen); font-size: 22px; font-weight: 600; }
@@ -646,7 +676,7 @@
           <div class="row" style="gap:16px;align-items:flex-start">
             ${zoomedPhoto('sutskever', '수츠케버', 'sm', 138, [192, 287, 0.47, 0.245, 0.13], 0.42)}
             ${Kit.photo('hinton', '힌턴', 'sm tilt-r', '--w:138px')}
-            <div class="stack" style="gap:8px;align-items:center;padding-top:26px"><div class="ak">AK</div><div class="hand" style="font-size:30px">크리제브스키</div></div>
+            <div class="stack" style="gap:8px;align-items:center;padding-top:26px;min-width:0"><div class="ak">AK</div><div class="hand ak-name" style="font-size:30px;white-space:nowrap;max-width:100%">크리제브스키</div></div>
           </div>
           <div class="demo" style="margin-top:24px">
             <div class="row center" style="justify-content:space-between">
@@ -662,6 +692,10 @@
         </div>
         <div class="src">출처: Krizhevsky·Sutskever·Hinton, NIPS 2012 (15.3%, 2위 26.2%) · Wikipedia ‘AlexNet’ (GTX 580 2장, 집에서 5~6일, 파라미터 약 6,000만) · Wikipedia ‘ImageNet’ (2010 28.2%, 2011 약 25%) · VGG 논문 (2013 Clarifai 11.7%) · GoogLeNet·ResNet 논문 · SENet 논문 (2016 2.99%, 2017 2.25%) · Karpathy 2014 (사람 5.1%) · 오른쪽 그림은 비유</div>`,
       init(el, K) {
+        // the name under "AK" stays on one line; it shrinks only when a wide fallback font would break it
+        const fitName = () => fitLine(el.querySelector('.ak-name'), 20);
+        onFonts(fitName);
+        this._fit = fitName;
         /* chart, drawn to scale */
         const svg = el.querySelector('svg.chart');
         const X0 = 70, X1 = 890, YT = 40, YB = 530, VMAX = 30;
@@ -685,7 +719,7 @@
           else {
             s += `<rect class="bar ${cls}" x="${cx(i) - BW / 2}" y="${y(v)}" width="${BW}" height="${YB - y(v)}"/>`;
             if (v < 5.1) s += `<text x="${cx(i)}" y="${y(v) + 28}" text-anchor="middle" class="val" style="fill:var(--paper)">${lab}</text>`;
-            else s += `<text x="${cx(i)}" y="${y(v) - 10}" text-anchor="middle" class="val">${lab}</text>`;
+            else s += `<text x="${cx(i)}" y="${y(v) - 10}" text-anchor="middle" class="val halo">${lab}</text>`;
           }
           s += `<text x="${cx(i)}" y="${YB + 30}" text-anchor="middle" class="yr${yr === 2012 ? ' on' : ''}">${yr}</text>`;
         });
@@ -700,7 +734,13 @@
         svg.innerHTML = s;
 
         /* CPU vs GPU painting race */
-        const W = 462, H = 236, CO = 16, RO = 11, CELL = 13, GX = [8, 246], GY = 44;
+        const W = 462, H = 262, CO = 16, RO = 11, CELL = 13, GX = [8, 246], GY = 66;
+        // labels: the chip name on one line, the explanation under it, both kept inside the grid width
+        const fitText = (txt, x, y, weight, px, family, maxW) => {
+          ctx.font = `${weight} ${px}px ${family}`;
+          while (px > 20 && ctx.measureText(txt).width > maxW) { px -= 1; ctx.font = `${weight} ${px}px ${family}`; }
+          ctx.fillText(txt, x, y, maxW);
+        };
         const { ctx } = K.canvas(el.querySelector('.cg-host'), W, H);
         const N = CO * RO, CPU_DT = 0.034, rnd = K.rand(580);
         const gpuAt = Array.from({ length: N }, () => 0.1 + rnd() * 0.2);
@@ -709,9 +749,12 @@
         function draw() {
           const C = K.colors();
           ctx.clearRect(0, 0, W, H);
-          ctx.textAlign = 'left'; ctx.font = `600 21px ${C.fontMono}`; ctx.fillStyle = C.ink;
-          ctx.fillText('CPU · 한 칸씩 차례로', GX[0], 26);
-          ctx.fillText('GPU · 모든 칸 한꺼번에', GX[1], 26);
+          ctx.textAlign = 'left'; ctx.fillStyle = C.ink;
+          fitText('CPU', GX[0], 24, 600, 22, C.fontMono, CO * CELL);
+          fitText('GPU', GX[1], 24, 600, 22, C.fontMono, CO * CELL);
+          ctx.fillStyle = C.ink2;
+          fitText('한 칸씩 차례로', GX[0], 52, 500, 21, C.fontBody, CO * CELL);
+          fitText('모든 칸 한꺼번에', GX[1], 52, 500, 21, C.fontBody, CO * CELL);
           const cpuDone = Math.min(N, Math.floor(t / CPU_DT));
           for (let g = 0; g < 2; g++) {
             const x0 = GX[g];
@@ -750,7 +793,7 @@
         K.onTheme(draw);
         draw();
       },
-      enter() { this._play && this._play(); },
+      enter() { this._fit && this._fit(); this._play && this._play(); },
       leave() { this._stop && this._stop(); },
     },
 
@@ -862,6 +905,8 @@
           #f-y2014 .tl { display: grid; grid-template-columns: 74px 1fr; row-gap: 12px; font-size: 28px; align-items: baseline; }
           #f-y2014 .tl b { font-family: var(--font-mono); font-weight: 600; font-size: 21px; color: var(--ink-2); }
           #f-y2014 .gen22 { left: 1196px; top: 34px; width: 376px; font-size: 30px; line-height: 1.08; padding: 14px 18px 16px; --tilt: 2deg; z-index: 2; word-break: keep-all; }
+          #f-y2014 .title { max-width: 1080px; white-space: nowrap; }
+          #f-y2014 .gen22 .hd { white-space: nowrap; }
           #f-y2014 .gen22 ol { list-style: none; margin: 8px 0 0; padding: 0; display: grid; grid-template-columns: auto 1fr; column-gap: 10px; row-gap: 2px; font-family: var(--font-body); font-size: 20px; line-height: 1.22; }
           #f-y2014 .gen22 li { display: contents; }
           #f-y2014 .gen22 li b { font-family: var(--font-mono); font-weight: 600; }
@@ -869,7 +914,7 @@
         <div class="kicker">2014 · 몬트리올 · 이언 굿펠로</div>
         <h2 class="title" style="font-size:70px">GAN: 위조범과 경찰을 싸우게 하면?</h2>
         <div class="abs sticky gen22" data-step="1">
-          <div>8년 뒤 2022: 문장 한 줄 → 그림</div>
+          <div class="hd">8년 뒤 2022: 문장 한 줄 → 그림</div>
           <ol>
             <li><b>4월</b><span>DALL·E 2</span></li>
             <li><b>7월</b><span>Midjourney</span></li>
@@ -897,6 +942,9 @@
         </div>
         <div class="src">출처: Goodfellow et al., arXiv 1406.2661 (2014-06-10) · MIT Technology Review 2018-02-21 ‘The GANfather’ (술집 일화, 첫 시도에 작동, 르쿤의 평가) · 그림은 원리를 보여 주는 단순 모형 · OpenAI DALL·E 2(2022.4.6) · Wikipedia ‘Midjourney’ · Stability AI(2022.8.22) · Wikipedia ‘Théâtre D’opéra Spatial’(2022.8.29)</div>`,
       init(el, K) {
+        const fitHead = () => { fitLine(el.querySelector('.title'), 54); fitLine(el.querySelector('.gen22 .hd'), 22); };
+        onFonts(fitHead);
+        this._fit = fitHead;
         const W = 1036, H = 492;
         const { ctx } = K.canvas(el.querySelector('.gan-host'), W, H);
         const THUMBS = [1, 20, 60, 120, 300];
@@ -974,7 +1022,7 @@
         K.onTheme(draw);
         draw();
       },
-      enter() { this._play && this._play(); },
+      enter() { this._fit && this._fit(); this._play && this._play(); },
       leave() { this._stop && this._stop(); },
     },
 
@@ -987,6 +1035,7 @@
       notes: '2016년 3월 9일부터 15일까지 서울 포시즌스 호텔에서 알파고가 이세돌 9단을 4승 1패로 이겼습니다. 전 세계 2억 명 이상이 봤고, 대국 직후 정부는 5년간 1조 원 AI 투자를 발표했습니다.\n2국 37수: 사람이라면 둘 확률이 1만 분의 1인 수. 이세돌은 “확률 계산하는 기계라 생각했는데, 이 수를 보고 생각을 바꿨다. 알파고는 창의적이다”라고 했습니다. 4국 78수: 이세돌의 ‘신의 한 수’로 거둔 1승. 알파고를 상대로 사람이 거둔 유일한 공식 승리입니다.\n클릭: [2국 37수] / [4국 78수] 버튼으로 바꿔 가며 이야기합니다(바둑판은 실제 좌표가 아니라 상징적 그림입니다). 마지막으로 2019년 은퇴 발언을 읽어 줍니다.\n질문: “이세돌의 ‘이길 수 없는 존재’라는 말, 여러분은 어떻게 들리나요?”',
       html: `
         <style>
+          #f-y2016 svg.board { overflow: visible; }
           #f-y2016 .bd-edge { fill: none; stroke: var(--ink); stroke-width: 3.5; }
           #f-y2016 .bd-ln { stroke: var(--ink-2); stroke-width: 1.6; }
           #f-y2016 .bd-star { fill: var(--ink-2); }
@@ -1211,9 +1260,10 @@
             ctx.font = `600 21px ${C.fontMono}`; ctx.fillStyle = C.pen;
             ctx.fillText(Math.round(k.P * 100) + '%', x + 44, L1Y - 8);
             ctx.font = `500 20px ${C.fontMono}`; ctx.fillStyle = C.ink;
-            ctx.fillText(k.N ? '승률 ' + Math.round((k.W / k.N) * 100) : '승률 ?', x + 44, L1Y + 18);
+            const lw = Math.min(170 - 30 - 44 - 2, W - 2 - (x + 44)); // up to the next node's circle / canvas edge
+            ctx.fillText(k.N ? '승률 ' + Math.round((k.W / k.N) * 100) : '승률 ?', x + 44, L1Y + 18, lw);
             ctx.fillStyle = C.ink2;
-            ctx.fillText('방문 ' + k.N, x + 44, L1Y + 42);
+            ctx.fillText('방문 ' + k.N, x + 44, L1Y + 42, lw);
           });
           if (bi >= 0) {
             ctx.strokeStyle = C.pen; ctx.lineWidth = 3;
@@ -1252,7 +1302,7 @@
       notes: '1교시를 세 장의 메모로 정리합니다(→ 키를 누를 때마다 한 장씩). ① AI는 규칙을 사람이 다 써 주는 게 아니라 데이터에서 배우는 기계. ② 신경망이 외면받던 겨울에도 포기하지 않은 사람들(힌턴, 르쿤)이 있었고, 데이터의 중요성을 먼저 본 사람(페이페이 리)이 있었다. ③ 2012년, 데이터(ImageNet) + GPU + 알고리즘(딥러닝)이 한자리에서 만났다.\n클릭: 오른쪽 [시작]을 누르면 10분 타이머가 돕니다. [정지]로 멈추고 [10분]으로 되돌립니다.\n2교시 예고: “ChatGPT는 어떻게 말할까?” 힌트는 오늘 첫 화면의 ‘다음 단어 맞히기’.\n질문: “세 가지 중 하나라도 빠졌다면 2012년의 빅뱅은 일어났을까요?”',
       html: `
         <style>
-          #f-break .sticky { position: absolute; font-size: 64px; width: 440px; min-height: 236px; }
+          #f-break .sticky { position: absolute; font-size: 64px; width: 440px; min-height: 236px; word-break: keep-all; }
           #f-break .sticky .n { font-family: var(--font-mono); font-size: 26px; display: block; margin-bottom: 6px; }
           #f-break .clock { position: absolute; left: 1050px; top: 70px; width: 458px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
           #f-break .ring { position: relative; width: 380px; height: 380px; }
@@ -1264,7 +1314,7 @@
           #f-break .digits b { font-family: var(--font-mono); font-weight: 600; font-size: 84px; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; line-height: 1; }
           #f-break .digits span { font-family: var(--font-hand); font-size: 36px; color: var(--pen); margin-top: 8px; }
           #f-break .digits.done b { background: var(--hl-soft); padding: 0 10px; }
-          #f-break .next { position: absolute; left: 1060px; top: 640px; width: 448px; }
+          #f-break .next { position: absolute; left: 1060px; top: 640px; width: 448px; word-break: keep-all; }
         </style>
         <div class="kicker">1교시 끝 · 쉬는 시간 10분</div>
         <h2 class="title">기억할 3가지</h2>
@@ -1287,6 +1337,8 @@
           <div class="hand" style="font-size:34px;margin-top:4px">힌트: 첫 화면의 ‘다음 단어 맞히기’</div>
         </div>`,
       init(el, K) {
+        const fitNotes = () => el.querySelectorAll('.sticky').forEach((n) => fitBox(n, 266, 36));
+        onFonts(fitNotes);
         const TOTAL = 600;
         const arc = el.querySelector('.ring .arc'), digits = el.querySelector('.digits'), num = digits.querySelector('b'), lab = digits.querySelector('.lab');
         const svg = el.querySelector('.ring svg');
@@ -1314,10 +1366,11 @@
           if (left <= 0) running = false;
           render();
         });
+        this._fit = fitNotes;
         this._sync = () => { if (running) { left = Math.max(0, (endAt - Date.now()) / 1000); if (left <= 0) running = false; } render(); };
         render();
       },
-      enter() { this._sync && this._sync(); },
+      enter() { this._fit && this._fit(); this._sync && this._sync(); },
     },
   ]);
 })();

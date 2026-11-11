@@ -72,8 +72,8 @@
     {
       when: '졸업 전', sub: '2·3학년', x: 594, y: 282, w: 452,
       items: [
-        ['b1', '자료구조 · 네트워크 · DB · 보안 기초 다지기'],
-        ['b2', '기능경기대회 · 정보올림피아드 · 해커톤 중 하나 도전', '선배들: 경기도 기능경기대회 <span class="nw">게임개발 금·은</span><br>2026 국제기능올림픽: 새 종목 <span class="nw">‘SW 테스팅’</span> 한국 은메달'],
+        ['b1', '자료구조&nbsp;· 네트워크&nbsp;· DB&nbsp;· 보안 기초 다지기'],
+        ['b2', '기능경기대회&nbsp;· 정보올림피아드&nbsp;· 해커톤 중 하나 도전', '선배들: 경기도 기능경기대회 <span class="nw">게임개발 금·은</span><br>2026 국제기능올림픽: 새 종목 <span class="nw">‘SW 테스팅’</span> 한국 은메달'],
         ['b3', '우리 학교(또는 도제 현장)의 진짜 문제 풀어 보기'],
       ],
     },
@@ -135,7 +135,7 @@
           #f-metr-paradox .wh { stroke: var(--ink); stroke-width: 3; fill: none; }
           #f-metr-paradox .zero { stroke: var(--ink); stroke-width: 3; }
           #f-metr-paradox .sep { stroke: var(--ink-3); stroke-width: 2; stroke-dasharray: 3 7; }
-          #f-metr-paradox .pred line { stroke: var(--pen); stroke-width: 3; stroke-dasharray: 3 7; stroke-linecap: round; }
+          #f-metr-paradox .pred path { fill: none; stroke: var(--pen); stroke-width: 3; stroke-dasharray: 3 7; stroke-linecap: round; }
           #f-metr-paradox .pred text { font-family: var(--font-hand); font-size: 34px; fill: var(--pen); paint-order: stroke; stroke: var(--paper); stroke-width: 6px; }
         </style>
         <div class="kicker">느낌 vs 측정 · METR 무작위 실험 (2025)</div>
@@ -168,7 +168,7 @@
         T(0, 372, '다른 실험들', 'grp');
         // prediction marker (behind bars)
         const pred = K.svg('g', { class: 'pred' }, svg);
-        const pl = K.svg('line', { y1: 92, y2: 304 }, pred);
+        const pl = K.svg('path', {}, pred);
         // rows
         const rows = MP_ROWS.map((r) => {
           const cy = r.y + r.h / 2;
@@ -191,10 +191,20 @@
         const pt = K.svg('text', { y: 334, 'text-anchor': 'middle' }, K.svg('g', { class: 'pred' }, svg));
 
         const inp = el.querySelector('.mp-pred'), out = el.querySelector('.mp-out');
+        // dotted line from y 92 to 304, broken where it would run through a visible value label
+        const drawLine = () => {
+          const x = X(+inp.value);
+          const gaps = rows.filter((r) => r.y < 304 && +r.val.style.opacity > 0.05).map((r) => r.val.getBBox())
+            .filter((b) => x > b.x - 6 && x < b.x + b.width + 6).map((b) => [b.y + 4, b.y + b.height - 4]);
+          let d = '', y0 = 92;
+          gaps.forEach(([a, b]) => { if (a > y0) d += `M${x},${y0}V${a}`; y0 = Math.max(y0, b); });
+          if (y0 < 304) d += `M${x},${y0}V304`;
+          pl.setAttribute('d', d || `M${x},304V304`);
+        };
         const setPred = () => {
           const v = +inp.value;
           const x = X(v);
-          pl.setAttribute('x1', x); pl.setAttribute('x2', x);
+          drawLine();
           // label sits beside its own line (never across the zero axis); flips left near the right edge
           const right = v >= 0 && x < 850;
           pt.setAttribute('x', right ? x + 12 : x - 12);
@@ -215,6 +225,7 @@
             r.val.style.opacity = K.clamp((anim - r.start - r.dur * 0.6) / 0.3, 0, 1);
             if (r.wh) r.wh.style.opacity = K.clamp((anim - r.start - r.dur) / 0.35, 0, 1);
           });
+          drawLine();
         };
         K.loop(el, (t, dt) => { if (anim < 3) { anim += dt; draw(); } });
         f._mpPlay = () => { anim = 0; draw(); };
@@ -269,7 +280,7 @@
           <div style="font-size:25px;line-height:1.4;margin-top:10px">단, 늘어난 자리의 <b>71%는 시니어</b>. 신입 문은 아직 좁다.</div>
           <div class="mono muted" style="font-size:20px;margin-top:6px">Indeed Hiring Lab, 2026.7.8 · 2025.2 이후</div>
         </div>
-        <div class="hand" style="font-size:38px;transform:rotate(-1.5deg);width:560px;margin-top:4px">단, 싸져도 더 원하지 않으면?<br>일거리는 줄어든다. 역설엔 조건이 있다.</div>
+        <div class="hand" style="font-size:38px;transform:rotate(-1.5deg);width:560px;margin-top:4px;white-space:nowrap">단, 싸져도 더 원하지 않으면?<br>일거리는 줄어든다. 역설엔 조건이 있다.</div>
         <div class="abs demo" style="position:absolute;left:700px;top:52px;width:812px">
           <svg class="jv-svg" viewBox="0 0 812 540" width="812" height="540" aria-label="소프트웨어 수요 곡선과 전체 개발 일거리"></svg>
           <div class="stack" style="gap:8px;margin-top:4px;padding-left:20px">
@@ -286,12 +297,15 @@
         // clip for plot
         const defs = K.svg('defs', {}, svg);
         const cp = K.svg('clipPath', { id: 'jv-clip' }, defs);
-        K.svg('rect', { x: OX, y: OY - PH - 10, width: PW + 14, height: PH + 10 }, cp);
+        K.svg('rect', { x: OX, y: OY - PH + 4, width: PW + 14, height: PH - 4 }, cp); // curve stops below the y-axis label
         // grid
         for (let q = 1; q <= 10; q++) K.svg('line', { x1: px(q), y1: OY, x2: px(q), y2: OY - PH, class: 'jv-grid' }, svg);
         for (let p = 0.25; p <= 1.01; p += 0.25) K.svg('line', { x1: OX, y1: py(p), x2: OX + PW, y2: py(p), class: 'jv-grid' }, svg);
         const newR = K.svg('rect', { x: OX, class: 'jv-new' }, svg);
-        const oldR = K.svg('rect', { x: OX, y: py(1), width: px(1) - OX, height: OY - py(1), class: 'jv-old' }, svg);
+        const oldR = K.svg('path', { class: 'jv-old' }, svg);
+        // the old dashed box; its right edge breaks [ga, gb] under a label sitting across it
+        const oldBox = (ga, gb) => oldR.setAttribute('d', ga == null ? `M${OX},${OY}V${py(1)}H${px(1)}V${OY}Z` : `M${OX},${OY}V${py(1)}H${px(1)}V${ga}M${px(1)},${gb}V${OY}H${OX}`);
+        oldBox();
         const gH = K.svg('line', { class: 'jv-guide' }, svg), gV = K.svg('line', { class: 'jv-guide' }, svg);
         const curve = K.svg('path', { class: 'jv-curve', 'clip-path': 'url(#jv-clip)' }, svg);
         // axes (hand-drawn L with arrowheads)
@@ -300,16 +314,58 @@
         K.svg('path', { class: 'jv-ax', d: `M${OX + PW + 4},${OY - 9} L${OX + PW + 18},${OY} L${OX + PW + 4},${OY + 9}` }, svg);
         T(OX - 12, py(1) + 7, '100%', '', 'end'); T(OX - 12, py(0.5) + 7, '50%', '', 'end'); T(OX - 12, OY + 7, '0', '', 'end');
         [1, 5, 10].forEach((q) => T(px(q), OY + 30, '×' + q, '', 'middle'));
-        T(OX + 16, OY - PH - 6, '하나 만드는 비용(사람 시간)', 'jv-axl');
-        T(OX + PW + 14, OY + 62, '만들어지는 소프트웨어 양 →', 'jv-axl', 'end');
+        const yLab = T(OX + 16, OY - PH - 6, '하나 만드는 비용(사람 시간)', 'jv-axl');
+        const xLab = T(OX + PW + 14, OY + 62, '만들어지는 소프트웨어 양 →', 'jv-axl', 'end');
         const oDot = K.svg('circle', { cx: px(1), cy: py(1), r: 8, class: 'jv-odot' }, svg);
-        T(px(1) + 16, py(1) - 10, '예전 (일거리 1)', 'jv-hand');
+        const oLab = T(px(1) + 16, py(1) - 10, '예전 (일거리 1)', 'jv-hand');
         const dot = K.svg('circle', { r: 11, class: 'jv-dot' }, svg);
         const inLab = T(0, 0, '', 'jv-in', 'middle');
         const r1 = T(OX + PW, 150, '', 'jv-big', 'end');
         const r2 = T(OX + PW, 192, '', 'jv-big', 'end');
-        T(OX + PW, 238, '노란 넓이 = 비용 × 양 = 전체 개발 일거리', 'jv-hand', 'end');
+        // two short lines, so the band beside the dot stays free for the area label
+        const note = T(OX + PW, 238, '', 'jv-hand', 'end');
+        ['노란 넓이 = 비용 × 양', '= 전체 개발 일거리'].forEach((s, i) => { K.svg('tspan', { x: OX + PW, dy: i ? 38 : 0 }, note).textContent = s; });
         oDot.parentNode.appendChild(oDot);
+        const AVOID = [yLab, xLab, oLab, r1, r2, note], OLDX = px(1), OLDY = py(1);
+        /* how badly the label box b collides at dot (x,y): 0 = clean */
+        function clash(b, yb, e, x, y, where) {
+          const l = b.x - 5, r = b.x + b.width + 5, t = yb - 28, bt = yb + 9; // glyph extent around the baseline (28px font)
+          if (l < OX + 4 || r > OX + PW + 12 || t < 0 || bt > OY - 3) return 99;
+          let n = 0;
+          AVOID.forEach((a) => { const k = a.getBBox(); if (l < k.x + k.width + 6 && r > k.x - 6 && t < k.y + k.height && bt > k.y) n += 8; });
+          if (l < x + 12 && r > x - 12 && t < y + 12 && bt > y - 12) n += 4; // dot
+          if (where === 'out') { if (l < x && bt > y) n += 4; } // must not sit on the yellow area
+          else if (l < OX || r > x || t < y || bt > OY) n += 99; // in-area label must fit inside it
+          if (where !== 'knock' && l < OLDX + 2 && r > OLDX - 2 && bt > OLDY && t < OY) n += 2; // old box edge
+          const ct = Math.max(t, OY - PH + 4); // curve: its x grows monotonically with y
+          if (bt > ct) {
+            const xa = px(Math.pow(((OY - ct) / PH) * PM, -e)), xb = bt >= OY ? Infinity : px(Math.pow(((OY - bt) / PH) * PM, -e));
+            if (xa < r && xb > l) n += 4;
+          }
+          return n;
+        }
+        function placeLabel(e, x, y) {
+          const mid = (y + OY) / 2 + 10;
+          const cands = [
+            [(OLDX + x) / 2, mid, 'middle', 'jv-in', 'in'], // inside, right of the old box
+            [(OX + x) / 2, mid, 'middle', 'jv-in', 'knock'], // inside, old box line knocked out
+            [x + 18, y - 14, 'start', 'jv-in out', 'out'], // above-right of the dot
+            [x + 24, y + 10, 'start', 'jv-in out', 'out'], // right of the dot
+            [x + 16, OY - 16, 'start', 'jv-in out', 'out'], // right of the area, bottom
+            [Math.max(x + 24, px(Math.pow(Math.max(0.01, ((OY - mid - 10) / PH) * PM), -e)) + 16), mid, 'start', 'jv-in out', 'out'], // middle, just right of the curve
+          ];
+          const put = (c) => { inLab.setAttribute('x', c[0]); inLab.setAttribute('y', c[1]); inLab.setAttribute('text-anchor', c[2]); inLab.setAttribute('class', c[3]); };
+          let best = null;
+          for (const c of cands) {
+            put(c);
+            const s = clash(inLab.getBBox(), c[1], e, x, y, c[4]);
+            if (!best || s < best.s) best = { c, s };
+            if (!s) break;
+          }
+          put(best.c);
+          if (best.c[4] === 'knock') oldBox(best.c[1] - 32, best.c[1] + 12);
+          else oldBox();
+        }
 
         const inP = el.querySelector('.jv-p'), inE = el.querySelector('.jv-e');
         const oP = el.querySelector('.jv-po'), oE = el.querySelector('.jv-eo');
@@ -334,15 +390,12 @@
           dot.setAttribute('cx', x); dot.setAttribute('cy', y);
           gH.setAttribute('x1', OX); gH.setAttribute('x2', x); gH.setAttribute('y1', y); gH.setAttribute('y2', y);
           gV.setAttribute('x1', x); gV.setAttribute('x2', x); gV.setAttribute('y1', y); gV.setAttribute('y2', OY);
-          const lab = '일거리 ×' + work.toFixed(2);
-          if (x - OX > 210 && OY - y > 56) { inLab.setAttribute('x', (OX + x) / 2); inLab.setAttribute('y', (y + OY) / 2 + 10); inLab.setAttribute('text-anchor', 'middle'); inLab.setAttribute('class', 'jv-in'); }
-          else if (y < py(1) + 50) { inLab.setAttribute('x', x + 26); inLab.setAttribute('y', y + 50); inLab.setAttribute('text-anchor', 'start'); inLab.setAttribute('class', 'jv-in out'); } // below-right: keeps clear of the "예전" label
-          else { inLab.setAttribute('x', x + 18); inLab.setAttribute('y', y - 14); inLab.setAttribute('text-anchor', 'start'); inLab.setAttribute('class', 'jv-in out'); }
-          inLab.textContent = lab;
           r1.textContent = '만들어지는 소프트웨어 ×' + Q.toFixed(1);
           const up = work > 1.005, down = work < 0.995;
           r2.textContent = '전체 개발 일거리 ×' + work.toFixed(2) + (up ? ' · 늘어남' : down ? ' · 줄어듦' : ' · 그대로');
           r2.setAttribute('class', 'jv-big ' + (up ? 'up' : down ? 'down' : ''));
+          inLab.textContent = '일거리 ×' + work.toFixed(2);
+          placeLabel(e, x, y);
         }
         inP.addEventListener('input', () => { st.tp = +inP.value / 100; outputs(); });
         inE.addEventListener('input', () => { st.te = +inE.value; outputs(); });
@@ -358,6 +411,7 @@
         const snap = () => { if (!el.classList.contains('current')) { st.p = st.tp; st.e = st.te; render(); } };
         inP.addEventListener('change', snap); inE.addEventListener('change', snap);
         outputs(); render();
+        if (document.fonts) document.fonts.ready.then(render); // label spots depend on measured text widths
       },
     },
 

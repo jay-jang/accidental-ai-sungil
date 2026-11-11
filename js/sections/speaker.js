@@ -45,6 +45,32 @@
   }
   const esc = (s) => Kit.escape(s);
   const isCurrent = (el) => el.classList.contains('current');
+  /* Nanum Pen Script is a narrow face. Without it (offline Windows PC: Google Fonts blocked, no local copy) the
+     handwritten notes fall back to a Korean gothic about 1.5× wider and overrun their spots (episode text running
+     off the frame, labels into stamps, notes into the TV drawing). Measure the hand font actually in use and expose
+     the shrink factor as --hk; the hand-font sizes below are calc(Npx * var(--hk, 1)), so with the pen font: no change. */
+  const HAND_SAMPLE = '가나다라마바사아자차', PEN_EM = 6.73; // HAND_SAMPLE's width in Nanum Pen Script, in em
+  const handFrames = [];
+  const handMeasure = () => {
+    const fam = getComputedStyle(document.documentElement).getPropertyValue('--font-hand').trim();
+    if (!fam) return;
+    const set = () => {
+      const c = document.createElement('canvas').getContext('2d');
+      c.font = `100px ${fam}`;
+      const w = c.measureText(HAND_SAMPLE).width / 100;
+      const k = w > 0 && PEN_EM / w < 0.95 ? Kit.clamp(PEN_EM / w, 0.6, 1) : 1;
+      handFrames.forEach((f) => f.style.setProperty('--hk', k.toFixed(3)));
+    };
+    try { document.fonts.load(`100px ${fam}`, HAND_SAMPLE).then(set, set); } catch (e) { set(); }
+  };
+  function handFit(el) {
+    handFrames.push(el);
+    if (handFrames.length === 1 && document.fonts) {
+      if (document.fonts.ready) document.fonts.ready.then(handMeasure);
+      document.fonts.addEventListener('loadingdone', handMeasure);
+    }
+    handMeasure();
+  }
 
   /* ═════════ 1. career-line — subway map ═════════ */
   const MAIN = [[50, 330], [330, 330], [390, 270], [740, 270], [800, 210], [880, 210], [940, 150], [1370, 150], [1410, 190], [1410, 400]];
@@ -134,7 +160,7 @@
 #f-career-line .cl-one{font-size:32px;line-height:1.3;font-weight:600}
 #f-career-line .cl-did{font-size:24px;color:var(--ink-2);margin-top:12px;line-height:1.4}
 #f-career-line .cl-did b{font-family:var(--font-mono);font-weight:600;font-size:20px;color:var(--ink-3);margin-right:10px}
-#f-career-line .cl-ep .hand{font-size:36px;line-height:1.15}
+#f-career-line .cl-ep .hand{font-size:calc(36px * var(--hk, 1));line-height:1.15}
 #f-career-line .cl-fade{transition:opacity .25s}
 </style>
 <div class="kicker">어쩌다 엔지니어 · 경력 노선도</div>
@@ -151,6 +177,7 @@
 </div>
 <div class="src cl-src"></div>`,
     init(el, K) {
+      handFit(el);
       const svg = el.querySelector('.cl-svg');
       const pd = (P) => 'M' + P.map((p) => p.join(',')).join(' L');
       let s = `
@@ -255,7 +282,7 @@
 #f-google-years .t-m{font-family:var(--font-mono);font-size:20px;fill:var(--ink-2)}
 #f-google-years .t-chip{font-family:var(--font-mono);font-size:20px;fill:var(--sticky-ink)}
 #f-google-years .chipbg{fill:var(--hl)}
-#f-google-years .t-hand{font-family:var(--font-hand);font-size:34px;fill:var(--pen)}
+#f-google-years .t-hand{font-family:var(--font-hand);font-size:calc(34px * var(--hk, 1));fill:var(--pen)}
 #f-google-years .pen-ln{fill:none;stroke:var(--pen);stroke-width:2.5;stroke-linecap:round}
 #f-google-years .led{stroke:var(--ink);stroke-width:2;fill:var(--bad);transition:fill .2s}
 #f-google-years .led.on{fill:var(--good)}
@@ -296,13 +323,15 @@
 </div>
 <div class="src">출처: AOSP gitiles 커밋 기록(jayjang@google.com, 저장소 4곳 계산) · HdmiControlService.java(AOSP main) · source.android.com HDMI-CEC · Android Developers 블로그 2026-05-19(월간 활성 기기 3억 대+) · AmCham 약력</div>`,
     init(el, K) {
+      handFit(el);
       /* chart (to scale) */
       const ch = el.querySelector('.gy-chart');
       const base = 210, k = 150 / 37, slot = 58, bx = (i) => 24 + i * slot;
       let c = `<line class="ax" x1="8" y1="${base}" x2="490" y2="${base}"/>`;
-      const mark = (x, label) => `<line x1="${x}" y1="24" x2="${x}" y2="${base}" style="stroke:var(--ink-3);stroke-width:2;stroke-dasharray:5 6"/><text x="${x}" y="14" text-anchor="middle" style="fill:var(--ink)">${label}</text>`;
+      const mark = (x, label, y2) => `<line x1="${x}" y1="24" x2="${x}" y2="${y2 == null ? base : y2}" style="stroke:var(--ink-3);stroke-width:2;stroke-dasharray:5 6"/><text x="${x}" y="14" text-anchor="middle" style="fill:var(--ink)">${label}</text>`;
       c += mark(bx(3) - 9, 'I/O · Android TV 공개');
-      c += mark(bx(6) + 20, 'Nexus Player');
+      // October's bar sits right under this marker: stop the dashes above its value label so the "1" stays readable
+      c += mark(bx(6) + 20, 'Nexus Player', f1(base - COMMITS[6][1] * k - 30));
       COMMITS.forEach(([m, v], i) => {
         const h = v * k;
         c += `<rect class="bar${i === 3 ? ' hl' : ''}" x="${bx(i)}" y="${f1(base - h)}" width="40" height="${f1(h)}"/>`;
@@ -329,7 +358,7 @@
           <rect class="scr-card" x="494" y="138" width="104" height="58" rx="4"/>
         </g>
         <path class="ink" d="M400,230 L384,262 M460,230 L476,262 M346,264 L514,264"/>
-        <text class="t-b" x="646" y="184">TV</text><text class="t-m" x="646" y="212">주소 0</text>
+        <text class="t-b" x="646" y="176">TV</text><text class="t-m" x="646" y="204">주소 0</text>
         <circle class="led led-tv" cx="612" cy="220" r="5"/>
         <path class="ink" d="${boxD(20, 300, 330, 104, 23)}"/>
         <text class="t-b" x="40" y="338">Android TV 셋톱박스</text>
@@ -464,6 +493,8 @@
 #f-yanolja-ai .lane.dim{opacity:.18}
 #f-yanolja-ai .flash{transition:fill .5s}
 #f-yanolja-ai .flash.hot{fill:var(--hl)}
+#f-yanolja-ai .price{transition:fill .5s}
+#f-yanolja-ai .price.hot{fill:var(--sticky-ink)}
 </style>
 <div class="kicker">2022 → 2026 · 야놀자 · 장정식 기고(2026.04)에서</div>
 <h2 class="title md">“AI를 ‘기능’이 아니라<br>‘운영 방식’으로”</h2>
@@ -542,7 +573,8 @@
       const priceAt = (h) => (10 + 4 * demand(h)).toFixed(1);
       const S2 = { h: 14, last: -1, n1: 1, n2: 14, p1: priceAt(9), p2: priceAt(14) };
       const hh = (h) => `${String(Math.floor(h)).padStart(2, '0')}:${String(Math.floor((h % 1) * 6) * 10).padStart(2, '0')}`;
-      const flash = (c) => { const n = q(c); n.classList.add('hot'); setTimeout(() => n.classList.remove('hot'), 380); };
+      // the tag turns yellow; its price switches to the dark "on yellow" ink so it stays readable in the dark theme too
+      const flash = (k) => { const ns = [q('.fl' + k), q('.pr' + k)]; ns.forEach((n) => n.classList.add('hot')); setTimeout(() => ns.forEach((n) => n.classList.remove('hot')), 380); };
       const render = (animate) => {
         const h = S2.h;
         q('.clock').textContent = `가상의 하루 · ${hh(h)}`;
@@ -569,9 +601,9 @@
         const prev = S2.h;
         S2.h = (S2.h + dt * 2) % 24; // 12 s per simulated day
         if (S2.h < prev) { S2.n1 = 0; S2.n2 = 0; } // midnight
-        if (prev < 9 && S2.h >= 9) { S2.p1 = priceAt(9); S2.n1++; flash('.fl1'); }
+        if (prev < 9 && S2.h >= 9) { S2.p1 = priceAt(9); S2.n1++; flash(1); }
         const hr = Math.floor(S2.h);
-        if (hr !== S2.last) { S2.last = hr; const np = priceAt(S2.h); if (np !== S2.p2) { S2.p2 = np; S2.n2++; flash('.fl2'); } }
+        if (hr !== S2.last) { S2.last = hr; const np = priceAt(S2.h); if (np !== S2.p2) { S2.p2 = np; S2.n2++; flash(2); } }
         render(true);
       });
       const btns = el.querySelectorAll('.ya-btns .btn');
@@ -589,14 +621,15 @@
   /* ═════════ 4. accidental-path — planned vs actual ═════════ */
   const KN = [ // knots of the real path (right panel coords) + labels [dx, dy, anchor]
     { p: [50, 570] },
-    { p: [160, 500], lab: '학교 + 첫 일', yr: '1999–', at: [22, 14, 'start'], sp: [182, 576, 'start'] },
-    { p: [100, 390], lab: '보안 → 게임', yr: '2003 넥슨', at: [-20, 4, 'end'], sp: [80, 456, 'end'] },
+    // sp = stamp anchor; each stamp is tilted -5°, so it clears its own label, the next label and the slider row below
+    { p: [160, 500], lab: '학교 + 첫 일', yr: '1999–', at: [22, 8, 'start'], sp: [182, 576, 'start'] },
+    { p: [100, 390], lab: '보안 → 게임', yr: '2003 넥슨', at: [-20, 0, 'end'], sp: [84, 450, 'end'] },
     { p: [270, 330], lab: '게임 → 검색', yr: '2007 구글', at: [0, -44, 'middle'], sp: [176, 290, 'end'] },
-    { p: [460, 470], lab: '검색 → TV', yr: '2014 Android TV', at: [0, 48, 'middle'], sp: [460, 582, 'middle'] },
-    { p: [560, 360], lab: '망설이다 멘토링', yr: '2015', at: [22, 10, 'start'], sp: [582, 434, 'start'] },
-    { p: [470, 220], lab: '14년 만의 이직', yr: '약 2021 광고 AI', at: [-22, 4, 'end'], sp: [448, 182, 'end'] },
+    { p: [460, 470], lab: '검색 → TV', yr: '2014 Android TV', at: [0, 48, 'middle'], sp: [544, 510, 'start'] },
+    { p: [560, 360], lab: '망설이다 멘토링', yr: '2015', at: [22, 10, 'start'], sp: [582, 440, 'start'] },
+    { p: [470, 220], lab: '14년 만의 이직', yr: '약 2021 광고 AI', at: [-22, 4, 'end'], sp: [448, 166, 'end'] },
     { p: [650, 250], lab: '엔지니어 → 대표', yr: '2022–2024', at: [22, 24, 'start'], sp: [780, 340, 'start'] },
-    { p: [670, 130], lab: '멈춤, 다시 코딩', yr: '2026', at: [-22, 4, 'end'], sp: [648, 92, 'end'] },
+    { p: [670, 130], lab: '멈춤, 다시 코딩', yr: '2026', at: [-22, 4, 'end'], sp: [648, 76, 'end'] },
     { p: [790, 70] },
   ];
   const accidentalPath = {
@@ -617,7 +650,7 @@
 #f-accidental-path .real{fill:none;stroke:var(--ink);stroke-width:6;stroke-linecap:round;stroke-linejoin:round}
 #f-accidental-path .next{fill:none;stroke:var(--ink-3);stroke-width:5;stroke-linecap:round;stroke-dasharray:2 14}
 #f-accidental-path .kn{fill:var(--paper);stroke:var(--ink);stroke-width:4}
-#f-accidental-path .lab{font-family:var(--font-hand);font-size:36px;fill:var(--ink)}
+#f-accidental-path .lab{font-family:var(--font-hand);font-size:calc(36px * var(--hk, 1));fill:var(--ink)}
 #f-accidental-path .lyr{font-family:var(--font-mono);font-size:20px;fill:var(--ink-3)}
 #f-accidental-path .lab,#f-accidental-path .lyr{paint-order:stroke;stroke:var(--paper);stroke-width:7px;stroke-linejoin:round}
 #f-accidental-path .k{transition:opacity .35s, transform .35s}
@@ -626,7 +659,7 @@
 #f-accidental-path .big{font-family:var(--font-mono);font-size:24px;font-weight:600}
 #f-accidental-path .qm{font-family:var(--font-display);font-size:72px;font-weight:800;fill:var(--ink-3)}
 #f-accidental-path .ap-def b{font-family:var(--font-display);font-weight:800;font-size:34px}
-#f-accidental-path .ap-q{transition:opacity .4s}
+#f-accidental-path .ap-q{transition:opacity .4s;font-size:calc(62px * var(--hk, 1))}
 #f-accidental-path .k:not(.end){cursor:pointer}
 #f-accidental-path .k .hit{fill:transparent;stroke:none}
 #f-accidental-path .k:not(.end):hover .kn{fill:var(--hl-soft)}
@@ -664,6 +697,7 @@
 </div>
 <div class="src">출처: 표준국어대사전 ‘어쩌다가’ · AmCham 약력 · 구글코리아 블로그 2016-06-29 · LinkedIn 2026-07-31 · 인용: ‘어쩌다 AI’ 태원고 편 강의 자료</div>`,
     init(el, K) {
+      handFit(el);
       /* planned: one ruler-straight arrow */
       const plan = el.querySelector('.ap-plan');
       const A = [60, 400], B = [340, 40];
@@ -805,7 +839,7 @@
 #f-mentor-note .grid-t{font-family:var(--font-mono);font-size:20px;fill:var(--ink-3)}
 #f-mentor-note .stat b{font-size:76px}
 #f-mentor-note .stat b small{font-size:36px;margin-left:4px}
-#f-mentor-note .sticky{font-size:46px;line-height:1.15}
+#f-mentor-note .sticky{font-size:calc(46px * var(--hk, 1));line-height:1.15}
 #f-mentor-note .sticky small{display:block;font-family:var(--font-mono);font-size:20px;line-height:1.35;margin-top:16px;opacity:.75}
 #f-mentor-note .mn-cap{transition:opacity .2s}
 #f-mentor-note .mn-col,#f-mentor-note .mn-cap,#f-mentor-note .sticky{word-break:keep-all}
@@ -827,9 +861,10 @@
 <div class="abs sticky" data-step="1" style="left:856px;top:84px;width:330px;--tilt:-2.5deg">어렵게 생각말고.<br>Just Do It.<small>2016 제주 멘토링 후기,<br>학생들에게 쓴 말</small></div>
 <div class="abs sticky" data-step="2" style="left:1190px;top:212px;width:322px;--tilt:2.2deg">도구는 계속 바뀐다.<br>배우는 습관이<br>남는다.<small>게임 → 검색 → TV → AI</small></div>
 <div class="abs sticky" data-step="3" style="left:910px;top:470px;width:330px;--tilt:-1deg">재밌게 살아요.<small>멘토링 끝에 늘 하던 말</small></div>
-<div class="abs hand" style="left:856px;top:730px;width:652px;font-size:38px;transform:rotate(-1deg)">소프트웨어개발과 · AI게임콘텐츠과 여러분,<br>저도 게임 회사(넥슨) 개발자였어요.</div>
+<div class="abs hand" style="left:856px;top:730px;width:652px;font-size:calc(38px * var(--hk, 1));transform:rotate(-1deg)">소프트웨어개발과 · AI게임콘텐츠과 여러분,<br>저도 게임 회사(넥슨) 개발자였어요.</div>
 <div class="src">출처: 구글코리아 블로그(2016-06·08·10, 2017-05, 2018-12, 2019-04·07) · LinkedIn · 구글코리아 블로그 2025-06-24(‘AI 퍼스트’ 멘토) · 성일정보고 홈페이지(학과) · 지도는 대략적인 해안선</div>`,
     init(el, K) {
+      handFit(el);
       const svg = el.querySelector('.mn-map');
       const P = COAST.map(([a, b]) => proj(a, b));
       const coastD = Kit.sketchPath(P.slice(5), { seed: 9, wobble: 2, tension: 0.35 });

@@ -53,12 +53,27 @@
   const clusterColors = (C) => [C.c[1], C.c[3], C.c[2], C.c[4], C.c[0]];
   /** canvas label on a paper patch so lines underneath never cut through it */
   function tag(ctx, C, text, x, y, hand) {
-    ctx.font = hand ? `32px ${C.fontHand}` : `600 20px ${C.fontMono}`;
+    // shrink the handwriting a little if a wider fallback font would run it off the canvas
+    const maxW = (parseFloat(ctx.canvas.style.width) || 1e9) - x - 12;
+    let size = hand ? 32 : 20;
+    const font = () => (ctx.font = hand ? `${size}px ${C.fontHand}` : `600 ${size}px ${C.fontMono}`);
+    font();
+    while (hand && size > 22 && ctx.measureText(text).width > maxW) { size -= 1; font(); }
     ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
     const w = ctx.measureText(text).width;
     ctx.save(); ctx.globalAlpha = 0.88; ctx.fillStyle = C.paper; ctx.fillRect(x - 6, y - (hand ? 27 : 20), w + 12, hand ? 34 : 28); ctx.restore();
     ctx.fillStyle = hand ? C.pen : C.ink2;
     ctx.fillText(text, x, y);
+  }
+
+  /** shrink the font of `els` together (each from its own CSS size) while `tooWide()` holds. Only a much wider
+      fallback font (web fonts blocked, e.g. a Windows PC where handwriting falls back to Malgun Gothic) triggers it;
+      inline sizes are cleared first, so calling it again after the web fonts arrive restores the designed size. */
+  function shrinkToFit(els, tooWide, minScale) {
+    els = Array.from(els);
+    els.forEach((e) => (e.style.fontSize = ''));
+    const base = els.map((e) => parseFloat(getComputedStyle(e).fontSize));
+    for (let k = 0.97; k >= (minScale || 0.6) && tooWide(); k -= 0.03) els.forEach((e, i) => (e.style.fontSize = (base[i] * k).toFixed(1) + 'px'));
   }
 
   /** gaussian blobs of points inside w×h */
@@ -264,12 +279,13 @@
           #f-nested .nz-tl text { font-family:var(--font-mono); font-size:20px; fill:var(--ink-2); }
           #f-nested .nz-tl .on text { fill:var(--ink); font-weight:600; }
           #f-nested .nz-tl g { cursor:pointer; }
+          #f-nested .nz-hint { left:772px; top:214px; font-size:38px; transform:rotate(4deg); white-space:nowrap; }
         </style>
         <div class="kicker">개념 지도 · 큰 우산 안의 작은 우산</div>
         <h2 class="title md">AI ⊃ 머신러닝 ⊃ 딥러닝 ⊃ 생성형 AI</h2>
         <svg class="nz-svg demo" viewBox="0 0 960 700" role="group" aria-label="네 겹의 동심원"></svg>
         <div class="nz-panel demo" aria-live="polite"></div>
-        <div class="abs hand" style="left:772px;top:214px;font-size:38px;transform:rotate(4deg)">↙ 고리를 눌러 보세요</div>
+        <div class="abs hand nz-hint">↙ 고리를 눌러 보세요</div>
         <div class="src">출처: 다트머스 제안서(1955) · Samuel(1959) · Krizhevsky 외(2012) · Reuters/UBS(2023.2): ChatGPT 월 사용자 1억 명 추정</div>`,
       init(el, K) {
         const svg = el.querySelector('.nz-svg');
@@ -315,6 +331,10 @@
         svg.addEventListener('keydown', (e) => { if (e.key === 'Enter') { const g = e.target.closest('.nz-ring'); if (g) show(+g.dataset.i); } });
         panel.addEventListener('click', (e) => { const g = e.target.closest('.nz-tl g[data-j]'); if (g) show(+g.dataset.j); });
         show(sel);
+        // the hint must end before the panel (x = 1010)
+        const hint = el.querySelector('.nz-hint');
+        const fitHint = () => shrinkToFit([hint], () => hint.offsetWidth > 224, 0.55);
+        fitHint(); K.onTheme(fitHint);
       },
     },
 
@@ -407,9 +427,13 @@
           el.querySelector('.ae-fut').textContent = now > 2026 ? '(미래)' : '';
           el.querySelector('.ae-n1').textContent = n1;
           el.querySelector('.ae-n2').textContent = n2;
+          // the one-line verdicts must not push the seven cards past the timeline's width
+          const last = cards.lastElementChild;
+          shrinkToFit(cards.querySelectorAll('.ae-s'), () => last.offsetLeft + last.offsetWidth - cards.offsetLeft > cards.clientWidth + 1, 0.55);
         };
         range.addEventListener('input', update);
         update();
+        K.onTheme(update);
       },
     },
 
@@ -740,6 +764,9 @@
       init(el, K) {
         const W = 445, H = 360;
         const self = this;
+        // photo caption: keep '알파고 대국 2016' whole (no ellipsis) even in a wider fallback font
+        const cap = el.querySelector('.photo figcaption');
+        if (cap) { const fitCap = () => shrinkToFit([cap, ...cap.querySelectorAll('small')], () => cap.scrollWidth > cap.clientWidth + 1, 0.6); fitCap(); K.onTheme(fitCap); }
 
         /* ── (a) supervised: perceptron finds a boundary ── */
         const A = K.canvas(el.querySelector('[data-k="sup"]'), W, H);
@@ -870,7 +897,8 @@
 
         /* ── (c) reinforcement: Q-learning (+ a little replay of remembered moves, Dyna-Q) in a small maze ── */
         const Cn = K.canvas(el.querySelector('[data-k="rl"]'), W, H);
-        const CS = 52, OX = (W - GW * CS) / 2, OY = (H - GH * CS) / 2 + 16;
+        const CS = 52, OX = (W - GW * CS) / 2, OY = (H - GH * CS) / 2 + 6;   // room for the tag above and the ‘출발’ label below
+        const isEnd = (x, y) => (x === GOAL[0] && y === GOAL[1]) || (x === TRAP[0] && y === TRAP[1]);
         const key = (x, y) => x + ',' + y;
         const rl = { Q: null, M: null, s: START.slice(), ep: 1, len: 0, trail: [], acc: 0, pause: 0, streak: 0, hold: 0, last: '', lastLen: 0 };
         const rlReset = () => {
@@ -928,33 +956,46 @@
           ctx.strokeStyle = C.ink3; ctx.lineWidth = 1;
           for (let x = 0; x <= GW; x++) { ctx.beginPath(); ctx.moveTo(OX + x * CS, OY); ctx.lineTo(OX + x * CS, OY + GH * CS); ctx.stroke(); }
           for (let y = 0; y <= GH; y++) { ctx.beginPath(); ctx.moveTo(OX, OY + y * CS); ctx.lineTo(OX + GW * CS, OY + y * CS); ctx.stroke(); }
-          // goal, trap, start
-          let [gx, gy] = [OX + GOAL[0] * CS, OY + GOAL[1] * CS];
+          // goal and trap cells (their +1 / −1 labels are drawn last, so the agent never covers them)
+          const [gx, gy] = [OX + GOAL[0] * CS, OY + GOAL[1] * CS], [tx, ty] = [OX + TRAP[0] * CS, OY + TRAP[1] * CS];
           ctx.fillStyle = C.hl; ctx.fillRect(gx + 4, gy + 4, CS - 8, CS - 8);
           ctx.strokeStyle = C.ink; ctx.lineWidth = 2.5; ctx.strokeRect(gx + 4, gy + 4, CS - 8, CS - 8);
-          ctx.fillStyle = C.termBg; ctx.font = `600 21px ${C.fontMono}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-          ctx.fillText('+1', gx + CS / 2, gy + CS / 2 + 1);
-          [gx, gy] = [OX + TRAP[0] * CS, OY + TRAP[1] * CS];
-          ctx.strokeStyle = C.bad; ctx.lineWidth = 3; ctx.strokeRect(gx + 5, gy + 5, CS - 10, CS - 10);
-          ctx.fillStyle = C.bad; ctx.fillText('−1', gx + CS / 2, gy + CS / 2 + 1);
-          ctx.fillStyle = C.ink2; ctx.font = `600 20px ${C.fontBody}`;
-          ctx.fillText('출발', OX + START[0] * CS + CS / 2, OY + START[1] * CS + CS / 2 + 1);
+          ctx.strokeStyle = C.bad; ctx.lineWidth = 3; ctx.strokeRect(tx + 5, ty + 5, CS - 10, CS - 10);
+          // start: labelled just below its cell, outside the maze, so the agent and its path never sit on the word
+          ctx.fillStyle = C.ink2; ctx.font = `600 20px ${C.fontBody}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText('↑ 출발', OX + START[0] * CS + CS / 2, OY + GH * CS + 17);
           // trail or learned path
+          const RING = 18;
           const path = final ? greedyPath() : rl.trail;
           if (final) {
+            const pts = path.map((s) => cellC(s[0], s[1]));
+            const n = pts.length, last = path[n - 1];
+            if (n > 1 && isEnd(last[0], last[1])) {   // stop at the ring, not on top of the +1
+              const [px, py] = pts[n - 2], [qx, qy] = pts[n - 1], d = Math.hypot(qx - px, qy - py) || 1;
+              pts[n - 1] = [qx - ((qx - px) / d) * (RING + 5), qy - ((qy - py) / d) * (RING + 5)];
+            }
             ctx.strokeStyle = C.pen; ctx.lineWidth = 4; ctx.setLineDash([2, 9]); ctx.lineCap = 'round';
-            ctx.beginPath(); path.forEach((s, i) => { const [x, y] = cellC(s[0], s[1]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.stroke(); ctx.setLineDash([]);
+            ctx.beginPath(); pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.stroke(); ctx.setLineDash([]);
           } else {
             ctx.fillStyle = C.pen; ctx.globalAlpha = 0.45;
             for (const s of path) {
-              if (s[0] === START[0] && s[1] === START[1]) continue;
+              if ((s[0] === START[0] && s[1] === START[1]) || isEnd(s[0], s[1])) continue;
               const [x, y] = cellC(s[0], s[1]); ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill();
             }
             ctx.globalAlpha = 1;
           }
+          // agent: a dot while walking; a ring around the +1 / −1 once it lands there, so the number stays readable
           const [ax, ay] = final ? cellC(GOAL[0], GOAL[1]) : cellC(rl.s[0], rl.s[1]);
-          ctx.fillStyle = C.pen; ctx.strokeStyle = C.paper; ctx.lineWidth = 2.5;
-          ctx.beginPath(); ctx.arc(ax, ay, final ? 10 : 13, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          if (final || isEnd(rl.s[0], rl.s[1])) {
+            ctx.strokeStyle = C.pen; ctx.lineWidth = 3.5;
+            ctx.beginPath(); ctx.arc(ax, ay, RING, 0, Math.PI * 2); ctx.stroke();
+          } else {
+            ctx.fillStyle = C.pen; ctx.strokeStyle = C.paper; ctx.lineWidth = 2.5;
+            ctx.beginPath(); ctx.arc(ax, ay, 13, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          }
+          ctx.font = `600 21px ${C.fontMono}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillStyle = C.termBg; ctx.fillText('+1', gx + CS / 2, gy + CS / 2 + 1);
+          ctx.fillStyle = C.bad; ctx.fillText('−1', tx + CS / 2, ty + CS / 2 + 1);
           if (final || rl.hold > 0) tag(ctx, C, final ? `${rl.ep}번 해 보고 찾은 길` : `지름길 발견! ${rl.lastLen}걸음`, 18, 38, true);
           else tag(ctx, C, rl.pause > 0 ? `시도 ${rl.ep}번째: ${rl.last} · ${rl.lastLen}걸음` : `시도 ${rl.ep}번째 · ${rl.len}걸음`, 18, 34);
         };
@@ -1077,10 +1118,12 @@
         const { cv, ctx } = K.canvas(host, W, H);
         const self = this;
         let pseed = 4, cseed = 2, k = 3, pts = [], cents = [], trails = [], steps = 0, done = false, auto = false, acc = 0;
+        /** keep points out of the bottom-right corner where the point count is written */
+        const clearLabel = (p) => { if (p.x > W - 150 && p.y > H - 52) p.y = H - 52; return p; };
         const genPts = () => {
           const r = K.rand(pseed * 31 + 1);
           const cs = [[0, 0], [0, 0], [0, 0]].map((_, i) => [230 + i * 270 + (r() - 0.5) * 120, i === 1 ? 170 + r() * 80 : 400 + r() * 110]);
-          pts = blobs(pseed * 7 + 3, cs, 26, 64, W, H, 26);
+          pts = blobs(pseed * 7 + 3, cs, 26, 64, W, H, 26).map(clearLabel);
         };
         const initCents = () => {
           const r = K.rand(cseed * 7919 + k * 13);
@@ -1121,8 +1164,12 @@
             ctx.strokeStyle = CL[i]; ctx.lineWidth = 5; ctx.lineCap = 'round';
             ctx.beginPath(); ctx.moveTo(c.x - 9, c.y - 9); ctx.lineTo(c.x + 9, c.y + 9); ctx.moveTo(c.x + 9, c.y - 9); ctx.lineTo(c.x - 9, c.y + 9); ctx.stroke();
           });
-          ctx.fillStyle = C.ink3; ctx.font = `600 20px ${C.fontMono}`; ctx.textAlign = 'right';
-          ctx.fillText(`점 ${pts.length}개`, W - 18, H - 18); ctx.textAlign = 'left';
+          // point count, on a paper patch so points, threads and trails never run through it
+          const lab = `점 ${pts.length}개`;
+          ctx.font = `600 20px ${C.fontMono}`; ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
+          const lw = ctx.measureText(lab).width;
+          ctx.save(); ctx.globalAlpha = 0.88; ctx.fillStyle = C.paper; ctx.fillRect(W - 24 - lw, H - 38, lw + 12, 28); ctx.restore();
+          ctx.fillStyle = C.ink3; ctx.fillText(lab, W - 18, H - 18); ctx.textAlign = 'left';
           ui();
         };
         const step = () => {
@@ -1143,7 +1190,7 @@
         cv.addEventListener('click', (e) => {
           const p = K.pt(e, cv);
           if (p.x < 6 || p.y < 6 || p.x > W - 6 || p.y > H - 6) return;
-          pts.push({ x: p.x, y: p.y, c: 0 });
+          pts.push(clearLabel({ x: p.x, y: p.y, c: 0 }));
           kmAssign(pts, cents);
           done = false;
           draw();

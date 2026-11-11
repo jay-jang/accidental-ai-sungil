@@ -355,7 +355,7 @@
         ${K.photo('bombe', '튜링의 봄브 <small>복원품</small>', 'sm wide tilt-r', 'position:absolute;left:178px;top:560px;--w:270px')}
         <div class="abs stack" style="left:500px;top:64px;width:1008px;gap:6px">
           <div class="kicker">1950 · 앨런 튜링 · 학술지 Mind</div>
-          <h2 class="title">“기계는 생각할 수 있는가?”</h2>
+          <h2 class="title" style="white-space:nowrap">“기계는 생각할 수 있는가?”</h2>
           <div class="mono muted" style="font-size:22px">“I propose to consider the question, ‘Can machines think?’”</div>
         </div>
         <div class="abs demo" style="position:absolute;left:500px;top:258px;width:1008px">
@@ -372,13 +372,13 @@
             <div class="ig-wall" title="칸막이"></div>
             <button class="ig-room" data-k="0" style="top:0"><span class="lab">A</span><span class="who"></span><span class="t"></span><span class="ans"></span></button>
             <button class="ig-room" data-k="1" style="top:188px"><span class="lab">B</span><span class="who"></span><span class="t"></span><span class="ans"></span></button>
+            <div class="mono faint" style="position:absolute;left:0;bottom:0;width:300px;font-size:20px;line-height:1.3">* 답은 강의용으로 지어낸 예시</div>
           </div>
-          <div class="row center" style="margin-top:14px;gap:20px;height:52px">
+          <div class="row center" style="margin-top:14px;gap:20px;min-height:52px">
             <div class="ig-msg grow" style="font-size:25px;line-height:1.25"></div>
             <span class="mono ig-score" style="font-size:22px;white-space:nowrap"></span>
             <button class="btn ig-next">다음 질문 →</button>
           </div>
-          <div class="mono faint" style="font-size:20px;margin-top:0">* 답은 강의용으로 지어낸 예시</div>
         </div>
         <div class="abs cols-3" data-step="1" style="left:500px;top:712px;width:1008px;gap:30px">
           <div class="stat"><b>≤70%</b><span>튜링의 예언: 50년쯤 뒤, 5분 대화 후 심판의 정답률</span></div>
@@ -553,7 +553,7 @@
           if (e) {
             const d = [ETA * e * x[0], ETA * e * x[1], -ETA * e];
             st.w[0] += d[0]; st.w[1] += d[1]; st.th += d[2];
-            const parts = [['A', d[0]], ['B', d[1]], ['θ', d[2]]].filter((q) => q[1]).map((q) => `${q[0]} ${fmt(q[1])}`);
+            const parts = [['A', d[0]], ['B', d[1]], ['θ', d[2]]].filter((q) => q[1]).map((q) => `<span style="white-space:nowrap">${q[0]} ${fmt(q[1])}</span>`);
             msg.innerHTML = `(${x[0]},${x[1]}) 틀림 → 다이얼 돌림: ${parts.join(', ')}`;
           } else msg.innerHTML = `(${x[0]},${x[1]}) 맞음 → 그대로`;
           if (correct() === 4) { msg.innerHTML = '<b>4개 모두 맞힘. AND를 스스로 배웠다!</b>'; st.run = false; }
@@ -586,8 +586,11 @@
         <style>
           #f-y1966 .term { position: relative; display: flex; flex-direction: column; padding: 18px 24px 16px; }
           #f-y1966 .e-log { flex: 1; overflow-y: auto; scrollbar-width: thin; display: flex; flex-direction: column; gap: 4px; padding-right: 6px; }
-          #f-y1966 .e-line { font-size: 25px; line-height: 1.4; animation: h1fade .35s ease; }
-          #f-y1966 .e-why { font-size: 20px; line-height: 1.3; color: var(--term-dim); margin: -2px 0 6px 92px; }
+          #f-y1966 .e-log { --ft: #000; --fb: #000; -webkit-mask-image: linear-gradient(to bottom, var(--ft) 0, #000 30px, #000 calc(100% - 30px), var(--fb) 100%); mask-image: linear-gradient(to bottom, var(--ft) 0, #000 30px, #000 calc(100% - 30px), var(--fb) 100%); }
+          #f-y1966 .e-log.above { --ft: transparent; }
+          #f-y1966 .e-log.below { --fb: transparent; }
+          #f-y1966 .e-line { font-size: 25px; line-height: 1.4; animation: h1fade .35s ease; overflow-wrap: anywhere; }
+          #f-y1966 .e-why { font-size: 20px; line-height: 1.3; color: var(--term-dim); margin: -2px 0 6px 92px; overflow-wrap: anywhere; }
           #f-y1966 .e-in { display: flex; gap: 12px; align-items: center; border-top: 1.5px dashed var(--term-dim); padding-top: 10px; margin-top: 8px; font-size: 25px; }
           #f-y1966 .e-in > span { flex: none; white-space: nowrap; }
           #f-y1966 .e-in > input { flex: 1; min-width: 0; width: auto; }
@@ -623,11 +626,18 @@
           </div>
         </div>
         <div class="src">출처: Wikipedia ‘ELIZA’ (Weizenbaum 1966, DOCTOR 스크립트, 비서 일화) · 규칙은 원래 ELIZA를 본뜬 한국어 예시</div>`,
-      init(el) {
+      init(el, K, f) {
         const log = el.querySelector('.e-log'), input = el.querySelector('.e-input');
         const mem = [];
         let dflt = 0;
         ELIZA_RULES.forEach((r) => { r.n = 0; });
+        // fade an edge only while lines are scrolled past it, so a half-hidden line reads as "scroll here", not as clipped text
+        const fade = () => {
+          log.classList.toggle('above', log.scrollTop > 2);
+          log.classList.toggle('below', log.scrollTop + log.clientHeight < log.scrollHeight - 2);
+        };
+        log.addEventListener('scroll', fade);
+        f.enter = fade; // layout may differ from init time (fonts)
         const add = (who, text, why) => {
           const d = document.createElement('div');
           d.className = 'e-line';
@@ -636,6 +646,7 @@
           if (why) { const w = document.createElement('div'); w.className = 'e-why'; w.textContent = '└ ' + why; log.appendChild(w); }
           while (log.children.length > 60) log.removeChild(log.firstChild);
           log.scrollTop = log.scrollHeight;
+          fade();
         };
         const respond = (raw) => {
           const s = raw.trim().replace(/[.!?~ㅠㅜ]+$/, '').trim();
@@ -725,7 +736,8 @@
         cv.style.cursor = 'grab'; cv.style.touchAction = 'none';
         const PX = (a) => 150 + a * 340, PY = (b) => 380 - b * 300;
         const PTS = [[0, 0, 0], [1, 0, 1], [0, 1, 1], [1, 1, 0]].map(([a, b, c]) => ({ x: PX(a), y: PY(b), c, a, b }));
-        const L0 = [[{ x: 60, y: 250 }, { x: 330, y: 440 }], [{ x: 600, y: 70 }, { x: 600, y: 440 }]];
+        // 2nd line starts right of every point and leaves the canvas above '입력 A →' (a vertical x=600 line sat on its arrow)
+        const L0 = [[{ x: 60, y: 250 }, { x: 330, y: 440 }], [{ x: 556, y: 40 }, { x: 622, y: 330 }]];
         const st = { lines: [L0[0].map((p) => ({ ...p }))], drag: null, tries: 0, best: Infinity };
         const side = (L, p) => Math.sign((L[1].x - L[0].x) * (p.y - L[0].y) - (L[1].y - L[0].y) * (p.x - L[0].x)) || 1;
         const sig = (p) => st.lines.map((L) => side(L, p)).join(',');
@@ -789,7 +801,8 @@
             if (wrong) {
               ctx.strokeStyle = C.bad; ctx.lineWidth = 4;
               ctx.beginPath(); ctx.arc(p.x, p.y, 36, 0, Math.PI * 2); ctx.stroke();
-              ctx.fillStyle = C.bad; ctx.font = `600 22px ${C.fontBody}`; ctx.fillText('틀림', p.x, p.y - 46);
+              // top-row points get the label underneath so it never lands on the '↑ 입력 B' axis label
+              ctx.fillStyle = C.bad; ctx.font = `600 22px ${C.fontBody}`; ctx.fillText('틀림', p.x, p.b ? p.y + 62 : p.y - 46);
             }
           });
           // status
@@ -837,7 +850,8 @@
           #f-y1980s .tl { display: grid; grid-template-columns: 76px 1fr; gap: 12px 14px; align-items: baseline; }
           #f-y1980s .tl .y { font-family: var(--font-mono); font-weight: 600; font-size: 24px; }
           #f-y1980s .tl .d { font-size: 23px; line-height: 1.35; }
-          #f-y1980s .rb { font-size: 20px; line-height: 1.45; padding: 12px 18px; height: 136px; }
+          #f-y1980s .rb { font-size: 20px; line-height: 1.45; padding: 12px 18px; height: 170px; }
+          #f-y1980s .rb > div { padding-left: 24px; text-indent: -24px; overflow-wrap: anywhere; }
           #f-y1980s .rb .x { color: var(--term-hi); }
         </style>
         <div class="kicker">1980년대 · 전문가 시스템 붐 → 2차 겨울</div>
@@ -946,14 +960,16 @@
           svg.innerHTML = h;
           // gauge
           const c = st.shown, col = c > 0.7 ? 'var(--bad)' : c > 0.4 ? 'var(--c4)' : 'var(--good)';
-          let gh = `<rect x="0" y="6" width="700" height="26" style="fill:var(--paper-2);stroke:var(--ink);stroke-width:2.5"/>`;
-          gh += `<rect x="2" y="8" width="${(696 * c).toFixed(1)}" height="22" style="fill:${col}"/>`;
-          for (let i = 1; i < 10; i++) gh += `<line x1="${i * 70}" y1="6" x2="${i * 70}" y2="${i % 5 ? 14 : 20}" style="stroke:var(--ink);stroke-width:2"/>`;
-          if (c > 0.82) gh += `<text x="${Math.min(690, 696 * c) - 8}" y="27" text-anchor="end" style="font-family:var(--font-hand);font-size:30px;fill:var(--paper)">아무도 전체를 모른다</text>`;
+          let gh = `<rect x="0" y="1" width="700" height="36" style="fill:var(--paper-2);stroke:var(--ink);stroke-width:2.5"/>`;
+          gh += `<rect x="2" y="3" width="${(696 * c).toFixed(1)}" height="32" style="fill:${col}"/>`;
+          for (let i = 1; i < 10; i++) gh += `<line x1="${i * 70}" y1="1" x2="${i * 70}" y2="${i % 5 ? 7 : 12}" style="stroke:var(--ink);stroke-width:2"/>`;
+          if (c > 0.82) gh += `<text x="${Math.min(690, 696 * c) - 8}" y="29" text-anchor="end" style="font-family:var(--font-hand);font-size:28px;fill:var(--paper)">아무도 전체를 모른다</text>`;
           gauge.innerHTML = gh;
           if (full !== false) {
             cnt.innerHTML = `규칙 <b>${st.R}</b>개 · 예외 <b class="bad">${st.E}</b>개 · 얽힘 <b class="bad">${st.links.length}</b>곳`;
-            rb.innerHTML = st.log.map((l) => `<div class="${l.exc ? 'x' : ''}" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${K.escape(l.t)}</div>`).join('');
+            // long rules wrap (hanging indent); older lines drop off the top until the newest ones fit whole
+            rb.innerHTML = st.log.map((l) => `<div class="${l.exc ? 'x' : ''}">${K.escape(l.t)}</div>`).join('');
+            while (rb.children.length > 1 && rb.scrollHeight > rb.clientHeight + 1) rb.removeChild(rb.firstElementChild);
             addBtn.disabled = st.R >= MAXR;
             addBtn.textContent = st.R >= MAXR ? '더는 못 고침' : `규칙 추가 (+${1 + Math.floor(st.R / 6)})`;
           }
@@ -1019,7 +1035,7 @@
         ${K.photo('hinton', '제프리 힌턴', '', 'position:absolute;left:1150px;top:64px;--w:280px;--tilt:-2deg')}
         ${K.photo('rumelhart', '러멜하트', 'sm', 'position:absolute;left:1340px;top:404px;--w:150px;--tilt:4deg;--pos:50% 20%')}
         <div class="abs mono" style="left:92px;top:806px;font-size:20px;color:var(--ink-2)">1986년 논문 속 신경망 학습: 곱셈·덧셈 약 6.7억 번 (Epoch 추정) · 지금 스마트폰이면 1초도 안 걸린다</div>
-        <div class="abs" style="left:1130px;top:676px;width:380px">
+        <div class="abs" style="left:1130px;bottom:68px;width:380px">
           <div class="hand" style="font-size:40px;line-height:1.15">신경망이 인기 없던 겨울에도 붙들고 있던 사람</div>
           <div class="mono" style="font-size:20px;color:var(--ink-2);margin-top:8px;line-height:1.4">1986 역전파 → 2012 AlexNet<br>→ 2024 노벨 물리학상</div>
         </div>

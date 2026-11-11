@@ -27,8 +27,8 @@
       html: `
         <div class="kicker">성일정보고등학교 IT 동아리 특강 · 2026년 11월 · 50분 × 2</div>
         <h1 class="abs display" style="left:86px;top:118px;font-weight:800;font-size:214px;line-height:.9;letter-spacing:-0.035em">어쩌다<br><span class="mark">AI</span></h1>
-        <div class="abs hand" style="left:440px;top:356px;font-size:100px;transform:rotate(-5deg);white-space:nowrap">성일 정보고 편</div>
-        <div class="abs row center" style="left:92px;top:540px;gap:18px">
+        <div class="abs hand t-sub" style="left:440px;top:356px;font-size:100px;transform:rotate(-5deg);white-space:nowrap">성일 정보고 편</div>
+        <div class="abs row center" style="left:92px;top:556px;gap:18px">
           <span style="font-family:var(--font-display);font-weight:600;font-size:40px">장정식</span>
           <span class="mono muted small">Jungshik Jang · 소프트웨어 엔지니어</span>
         </div>
@@ -39,9 +39,14 @@
         </div>
         <div class="abs hand" style="left:96px;top:626px;font-size:38px">↓ 오늘 먼저 들를 곳</div>
         <div class="abs hand" style="left:582px;top:626px;font-size:38px">↓ 마지막에 돌아올 곳</div>
-        <div class="abs mono tiny faint t-start" style="right:96px;bottom:40px">→ 키를 누르면 출발</div>
+        <div class="abs mono tiny faint t-start" style="right:96px;bottom:40px"><span class="if-mouse">→ 키를 누르면 출발</span><span class="if-touch">아래 ‘다음 ›’을 누르면 출발</span></div>
         <div class="abs hand t-bye" style="right:96px;bottom:26px;font-size:54px">고맙습니다 · 질문은 언제든</div>`,
       init(el, K) {
+        /* without Nanum Pen Script (offline Windows PC) the subtitle falls back to a much wider gothic: shrink it so it stays clear of the demo */
+        const sub = el.querySelector('.t-sub');
+        const fitSub = () => { sub.style.fontSize = '100px'; const w = sub.offsetWidth; if (w > 540) sub.style.fontSize = `${Math.floor((100 * 540) / w)}px`; };
+        fitSub();
+        if (document.fonts) { document.fonts.ready.then(fitSub); document.fonts.addEventListener('loadingdone', fitSub); }
         const opts = [['AI', 0.61], ['개발자', 0.22], ['여기까지', 0.09], ['보니', 0.05]];
         const bars = el.querySelector('.t-bars');
         bars.innerHTML = opts.map(([w, p]) => `
@@ -141,6 +146,7 @@
       minutes: 1.5,
       notes: '질문 세 개를 읽어주고, 답은 지금 하지 않습니다. “2교시 끝에 이 세 장의 메모로 다시 돌아옵니다.”\n→ 키를 누를 때마다 메모가 한 장씩 붙습니다.',
       html: `
+        <style>#f-questions .sticky { word-break: keep-all; }</style>
         <div class="kicker">오늘의 질문</div>
         <h2 class="title">끝까지 들고 갈 질문 3개</h2>
         <div class="row" style="flex:1;align-items:center;justify-content:space-between;gap:40px;padding:0 10px">

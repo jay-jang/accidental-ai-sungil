@@ -47,9 +47,18 @@
     pd: { name: '퍼블릭 도메인·CC0', short: 'PD·CC0', tip: '자유' },
     other: { name: '기타', short: '기타', tip: '' },
   };
+  // shrink an SVG <text> (never below 20px) so it fits maxW — keeps hand labels inside the clip/off the path
+  // when the hand font is missing and a wider fallback font is used
+  const fitSvgText = (t, maxW) => {
+    t.style.fontSize = '';
+    let w = 0;
+    try { w = t.getComputedTextLength(); } catch (e) { w = 0; }
+    if (w > maxW) t.style.fontSize = Math.max(20, Math.floor((parseFloat(getComputedStyle(t).fontSize) * maxW) / w)) + 'px';
+  };
   const shortSubject = (s) => {
     s = String(s || '').trim();
-    const cut = s.split(/\s[-–—]\s|\s\(|,\s|;\s/)[0];
+    // drop parentheticals first, so "first working (point-contact) transistor" keeps its noun
+    const cut = s.replace(/\s*\([^()]*\)/g, '').split(/\s[-–—]\s|\s\(|,\s|;\s/)[0].trim();
     return cut.length > 4 ? cut : s;
   };
 
@@ -87,12 +96,12 @@
         <style>
           #f-answers .a-rows { flex: 1; display: flex; flex-direction: column; justify-content: space-evenly; gap: 14px; margin-top: -6px; }
           #f-answers .a-row { display: grid; grid-template-columns: 360px 92px 1fr; align-items: center; }
-          #f-answers .sticky { width: 360px; font-size: 44px; line-height: 1.08; padding: 16px 24px 20px; }
+          #f-answers .sticky { width: 360px; font-size: 44px; line-height: 1.08; padding: 16px 24px 20px; word-break: keep-all; overflow-wrap: break-word; }
           #f-answers .sticky .q { font-family: var(--font-mono); font-size: 22px; display: block; margin-bottom: 4px; }
           #f-answers .arr { width: 92px; height: 60px; overflow: visible; }
           #f-answers .arr path { fill: none; stroke: var(--pen); stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round; }
           #f-answers .ans { display: grid; grid-template-columns: 1fr 450px; gap: 26px; align-items: center; }
-          #f-answers .ans .hand { font-size: 50px; line-height: 1.05; }
+          #f-answers .ans .hand { font-size: 50px; line-height: 1.05; word-break: keep-all; overflow-wrap: break-word; }
           #f-answers .ans .sub { font-size: 25px; line-height: 1.38; color: var(--ink-2); margin-top: 8px; }
           #f-answers .ans .sub b { color: var(--ink); font-weight: 600; }
           #f-answers svg.ink { width: 450px; height: 170px; overflow: visible; font-family: var(--font-body); }
@@ -182,7 +191,7 @@
             </div>
           </div>
         </div>
-        <div class="src">출처: Vaswani 외, Attention Is All You Need (2017) · AlexNet (2012, 게임용 GPU 2장) · ChatGPT 공개 2022-11-30 · Stack Overflow 개발자 설문 2025 · Q1 막대는 첫 화면의 예시</div>`,
+        <div class="src">출처: Vaswani 외, Attention Is All You Need (2017) · AlexNet (2012, 게임용 GPU 2장) · ChatGPT 공개 2022-11-30 · Stack Overflow 설문 2025 · Q1 막대: 첫 화면 예시</div>`,
     },
 
     /* ───────────── 2. accidental-you ───────────── */
@@ -264,6 +273,21 @@
         });
         const lab = K.svg('text', { class: 'ay-hand', x: 1290, y: 268 }, gB);
         lab.textContent = '여기부터는 여러분이 그려요';
+        const note = svg.querySelector('.ay-note');
+        const msg = el.querySelector('.abs.ay-msg');
+        const fit = () => {
+          fitSvgText(tt, 168);   // right edge fixed at the handoff; keep its left end off the 2022 descent (x≈1080)
+          // stay clear of the big bottom line, whose left edge moves left with a wider fallback display font
+          const msgL = msg && msg.offsetParent ? msg.offsetLeft : 0;
+          fitSvgText(note, msgL > 200 ? Math.min(340, msgL - 124) : 340);
+          fitSvgText(lab, 344);  // must stay inside the branch clip (x 1240–1600)
+          let w = 0;
+          try { w = lab.getComputedTextLength(); } catch (e) { w = 0; }
+          if (w) lab.setAttribute('x', String(Math.round(Math.max(1244, Math.min(1290, 1588 - w)))));
+        };
+        fit();
+        if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+        f._ayFit = fit;
         const clip = svg.querySelector('.ay-cliprect');
         const clipX = 1240, clipW = 360;
 
@@ -293,6 +317,7 @@
       enter(el, K, f) {
         const st = f._ay; if (!st) return;
         f._ayHere = true;
+        if (f._ayFit) f._ayFit();
         if ((window.Deck.step || 0) >= 1) { st.p = st.pT = 1; st.b = st.bT = 1; }
         else { st.p = 0; st.pT = 1; st.b = 0; st.bT = 0; }
         f._ayRender();
@@ -336,12 +361,14 @@
         <style>
           #f-qna .qa-big { left: 78px; top: 96px; font-family: var(--font-display); font-weight: 800; font-size: 236px; line-height: 1; letter-spacing: -0.03em; white-space: nowrap; }
           #f-qna .qa-hl { left: 96px; top: 252px; width: 640px; height: 70px; background: var(--hl-soft); transform: rotate(-1.6deg); border-radius: 3px 10px 4px 12px; }
-          #f-qna .qa-note { width: 296px; min-height: 150px; font-size: 38px; line-height: 1.1; padding: 16px 22px 22px; }
+          #f-qna .qa-note { width: 296px; min-height: 150px; font-size: 38px; line-height: 1.1; padding: 16px 22px 22px; word-break: keep-all; overflow-wrap: break-word; }
           #f-qna .qa-note .tag { display: block; font-family: var(--font-mono); font-size: 20px; opacity: 0.72; margin-bottom: 6px; }
           #f-qna .qa-blank { width: 296px; height: 168px; border: 3px dashed var(--pen); border-radius: 4px; padding: 18px 22px; font-family: var(--font-hand); font-size: 40px; line-height: 1.1; color: var(--pen); transform: rotate(1.2deg); }
           #f-qna .qa-link { font-family: var(--font-mono); font-size: 32px; font-weight: 600; color: var(--ink); text-decoration: none; border-bottom: 4px solid var(--pen); padding-bottom: 2px; }
           #f-qna .quote { font-size: 40px; }
           #f-qna .quote cite { font-size: 20px; }
+          /* offline fallback serifs (Batang, AppleMyungjo) draw “ full-width, on top of the first letter */
+          #f-qna .quote::before { font-family: "Hahmlet", Georgia, "Times New Roman", serif; }
         </style>
         <div class="kicker">마무리 · 질문 시간</div>
         <div class="abs qa-hl"></div>
@@ -404,18 +431,17 @@
           #f-credits .cr-row:last-child { border-bottom: 0; }
           #f-credits .cr-row[hidden] { display: none; }
           #f-credits .cr-row img { width: 54px; height: 54px; object-fit: cover; object-position: 50% 30%; filter: grayscale(1) contrast(1.05); background: var(--paper-3); display: block; }
-          #f-credits .cr-sub { font-size: 22px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3; }
-          #f-credits .cr-meta { display: flex; gap: 8px; font-family: var(--font-mono); font-size: 20px; color: var(--ink-2); line-height: 1.3; white-space: nowrap; }
-          #f-credits .cr-meta .au { overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
-          #f-credits .cr-meta .li { color: var(--ink); flex: none; }
-          #f-credits .cr-meta a { color: var(--pen); flex: none; }
-          #f-credits .cr-meta .sep { color: var(--ink-3); flex: none; }
+          #f-credits .cr-sub { font-size: 22px; font-weight: 600; line-height: 1.3; overflow-wrap: break-word; }
+          #f-credits .cr-meta { font-family: var(--font-mono); font-size: 20px; color: var(--ink-2); line-height: 1.3; overflow-wrap: break-word; }
+          #f-credits .cr-meta .li { color: var(--ink); white-space: nowrap; }
+          #f-credits .cr-meta a { color: var(--pen); white-space: nowrap; }
+          #f-credits .cr-meta .sep { color: var(--ink-3); margin: 0 8px; }
           #f-credits .cr-empty { padding: 30px 10px; }
           #f-credits .rf-head { display: flex; align-items: baseline; gap: 16px; margin-bottom: 10px; }
           #f-credits .rf { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 62px 1fr; column-gap: 12px; row-gap: 3px; font-size: 21px; line-height: 1.3; }
           #f-credits .rf .tg { font-family: var(--font-mono); font-size: 20px; color: var(--pen); font-weight: 600; }
           #f-credits .rf .tg.gap { padding-top: 12px; }
-          #f-credits .rf .it { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          #f-credits .rf .it { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-bottom: 5px; margin-bottom: -5px; } /* room for the link underline inside the clip, row height unchanged */
           #f-credits .rf .it.gap { padding-top: 12px; }
           #f-credits .rf a { color: var(--ink); text-decoration: none; border-bottom: 1.5px solid var(--ink-3); }
           #f-credits .rf a:hover { border-bottom-color: var(--pen); color: var(--pen); }

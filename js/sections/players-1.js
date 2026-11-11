@@ -224,7 +224,7 @@
           #f-network .nd.big .wm { font-size: 30px; }
           #f-network .nd:hover .ring, #f-network .nd:hover .box { stroke: var(--pen); stroke-width: 4; }
           #f-network svg.sel .nd.dim { opacity: 0.6; }
-          #f-network .src { right: 470px; }
+          #f-network .src { right: 470px; word-break: keep-all; }
           #f-network svg .nd.faint { opacity: 0.35; }
           #f-network .nw-panel { position: absolute; left: 1150px; top: 50px; width: 418px; height: 804px; padding: 22px 22px 18px 26px; background: var(--paper-2); border-left: 4px solid var(--ink); display: flex; flex-direction: column; gap: 12px; }
           #f-network .nw-head { display: flex; align-items: center; gap: 16px; min-height: 96px; }
@@ -245,6 +245,9 @@
           #f-network .nw-legend div { display: grid; grid-template-columns: 56px 1fr; gap: 12px; align-items: center; }
           #f-network .nw-more { font-family: var(--font-mono); font-size: 20px; color: var(--pen); text-align: right; margin-top: -4px; }
           #f-network .nw-more[hidden] { display: none; }
+          #f-network .nw-rels.fade { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 44px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 44px), transparent); }
+          #f-network .nw-rels.fade-top { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 32px); mask-image: linear-gradient(to bottom, transparent, #000 32px); }
+          #f-network .nw-rels.fade.fade-top { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 32px, #000 calc(100% - 44px), transparent); mask-image: linear-gradient(to bottom, transparent, #000 32px, #000 calc(100% - 44px), transparent); }
           #f-network .nw-sub { font-size: 22px; line-height: 1.35; color: var(--ink-2); word-break: keep-all; }
           #f-network .nw-hint { font-family: var(--font-hand); font-size: 36px; color: var(--pen); line-height: 1.1; }
         </style>
@@ -347,6 +350,10 @@
           const ol = panel.querySelector('.nw-rels'), more = panel.querySelector('.nw-more');
           if (!ol || !more) return;
           more.hidden = ol.scrollHeight <= ol.clientHeight + 4 || ol.scrollTop + ol.clientHeight >= ol.scrollHeight - 4;
+          // fade the last visible row so it reads as "scroll for more", not as cut-off text
+          ol.classList.toggle('fade', !more.hidden);
+          // once scrolled, the row sliding out at the top fades too instead of showing half-cut glyphs
+          ol.classList.toggle('fade-top', ol.scrollTop > 4);
         }
         function renderPanel() {
           if (!sel && filter !== 'all') {
@@ -485,6 +492,7 @@
           #f-google-deepmind .ax { font-family: var(--font-hand); font-size: 34px; fill: var(--pen); }
           #f-google-deepmind .gd-card { position: absolute; left: 858px; top: 50px; width: 652px; height: 320px; display: grid; grid-template-columns: 196px 1fr; gap: 26px; align-items: start; }
           #f-google-deepmind .gd-card .photo { --w: 186px; margin-top: 14px; }
+          #f-google-deepmind .gd-card .photo figcaption { font-size: 35px; }
           #f-google-deepmind .gd-card .photo.wide img { --ratio: 4 / 3; }
           #f-google-deepmind .gd-stat { margin-top: 18px; border: 3px solid var(--ink); padding: 18px 14px 16px; transform: rotate(-1.5deg); background: var(--paper); text-align: center; }
           #f-google-deepmind .gd-stat b { display: block; font-family: var(--font-mono); font-weight: 600; font-size: 44px; line-height: 1.05; letter-spacing: -0.02em; }
@@ -586,9 +594,34 @@
           placed.push(best.box);
           return best;
         });
+        // knock the support posts out behind each label, so no post strikes through a date or a heading
+        const pm = K.svg('mask', { id: 'gd-postmask', maskUnits: 'userSpaceOnUse', x: 0, y: 0, width: 1600, height: 900 }, svg);
+        K.svg('rect', { x: 0, y: 0, width: 1600, height: 900, fill: '#fff' }, pm);
+        placed.forEach((b) => K.svg('rect', { x: b[0] + 4, y: b[1] - 6, width: b[2] - b[0] - 8, height: b[3] - b[1] + 12, rx: 6, fill: '#000' }, pm));
+        gP.setAttribute('mask', 'url(#gd-postmask)');
         // events
         const gE = svg.querySelector('.g-ev');
-        const lens = pts.map((p) => Math.max(0, atX(p[0])[2] - 40));
+        // where the cart parks for each event: just before (or after) the dot, on whichever side keeps
+        // the cart off the neighbouring labels (box = the rotated cart body + wheels, as placeCart draws it)
+        const cartBox = (s) => {
+          const p = path.getPointAtLength(s), q = path.getPointAtLength(Math.min(total, s + 3));
+          const a = Math.atan2(q.y - p.y, q.x - p.x), c = Math.cos(a), sn = Math.sin(a);
+          const xs = [], ys = [];
+          [[-24, -24], [24, -24], [24, 3], [-24, 3]].forEach(([u, v]) => { xs.push(p.x + u * c - v * sn); ys.push(p.y + u * sn + v * c); });
+          return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+        };
+        const overlap = (a, b) => Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+        const lens = pts.map((p) => {
+          const s0 = atX(p[0])[2];
+          let best = null;
+          for (const o of [-40, 40, -54, 54]) {
+            const s = Math.max(0, Math.min(total, s0 + o));
+            const cb = cartBox(s), cost = placed.reduce((acc, b) => acc + overlap(cb, b), 0);
+            if (!best || cost < best.cost) best = { s, cost };
+            if (!cost) break;
+          }
+          return best.s;
+        });
         const evEls = GOOG.map((e, i) => {
           const [x, y] = pts[i];
           const s = spots[i];
@@ -665,7 +698,7 @@
           #f-hassabis .tile.star .no { background: var(--hl); color: #1b2630; }
           #f-hassabis .tile .tx { padding-left: 72px; }
           #f-hassabis .tile .y { font-family: var(--font-mono); font-size: 20px; color: var(--ink-2); }
-          #f-hassabis .tile .h { font-family: var(--font-display); font-weight: 800; font-size: 27px; line-height: 1.15; }
+          #f-hassabis .tile .h { font-family: var(--font-display); font-weight: 800; font-size: 27px; line-height: 1.15; white-space: nowrap; }
           #f-hassabis .tile .s { font-size: 21px; line-height: 1.3; color: var(--ink-2); margin-top: 3px; }
           #f-hassabis .lane { position: absolute; font-family: var(--font-display); font-weight: 800; font-size: 36px; line-height: 1; white-space: nowrap; }
           #f-hassabis .lane small { font-family: var(--font-mono); font-weight: 400; font-size: 20px; color: var(--ink-2); margin-left: 8px; letter-spacing: .04em; }
@@ -705,13 +738,24 @@
         <div class="abs" data-step="1" style="left:618px;top:474px;display:flex;gap:14px">${Kit.photo('shane-legg', '셰인 레그', 'mini tilt-r')}${Kit.photo('mustafa-suleyman', '술레이만', 'mini')}</div>
 
         <div class="tile" data-step="2" style="left:470px;top:682px"><div class="no">7</div><div class="tx"><div class="y">2014.1</div><div class="h">구글이 인수</div><div class="s">4억 파운드 (보도)</div></div></div>
-        <div class="tile" data-step="2" style="left:715px;top:682px"><div class="no">8</div><div class="tx"><div class="y">2016.3 · 서울</div><div class="h">알파고 4 : 1</div><div class="s">이세돌 9단과의 다섯 판</div></div></div>
+        <div class="tile" data-step="2" style="left:715px;top:682px"><div class="no">8</div><div class="tx"><div class="y">2016.3 · 서울</div><div class="h">알파고 4 : 1</div><div class="s">이세돌 9단과의 다섯&nbsp;판</div></div></div>
         <div class="tile star" data-step="2" style="left:960px;top:682px;width:280px"><div class="no">9</div><div class="tx"><div class="y">2024</div><div class="h">노벨 화학상</div><div class="s">AlphaFold, 존 점퍼와 공동 수상</div></div></div>
         <div class="abs" data-step="2" style="left:1262px;top:690px;width:250px">
           <div class="mono" style="font-size:20px;color:var(--ink-2)">2026.8 · 지금</div>
           <div class="hand" style="font-size:34px;line-height:1.08;margin-top:2px">DeepMind 의장 겸<br>알파벳 수석과학자</div>
         </div>
         <div class="src">출처: Demis Hassabis·Google DeepMind 위키백과, nobelprize.org(2024 화학상), DeepMind AlphaGo 페이지, The Next Web(2026.8)</div>`,
+      // Station titles stay on one line; with a wider substitute display font (offline PC) they
+      // shrink instead of wrapping into the lane label below. No-op with Hahmlet.
+      init(el, K, f) {
+        f._fit = () => el.querySelectorAll('.tile .h').forEach((h) => {
+          h.style.fontSize = '';
+          const avail = h.clientWidth;
+          if (avail && h.scrollWidth > avail + 1) h.style.fontSize = Math.max(20, Math.floor((27 * avail) / h.scrollWidth)) + 'px';
+        });
+        f._fit(); K.onTheme(f._fit);
+      },
+      enter(el, K, f) { f._fit(); },
     },
 
     /* ═════════════════════════ 4. OPENAI FOUNDING ═════════════════════════ */
@@ -751,7 +795,7 @@
           <path class="tenh" d="M540,490 L568,474 L566,504 Z"/>
           <text x="676" y="548" style="font-family:var(--font-hand);font-size:44px;fill:var(--rel-tension)">견제</text>
         </svg>
-        <div class="abs" style="left:214px;top:296px;font-family:var(--font-display);font-weight:800;font-size:56px">Google</div>
+        <div class="abs" style="left:202px;top:296px;font-family:var(--font-display);font-weight:800;font-size:56px">Google</div>
         <div class="g-in">
           <div class="row1"><span>2011</span><span>구글 브레인</span></div>
           <div class="row1"><span>2013</span><span>힌턴 영입</span></div>
@@ -913,6 +957,12 @@
           <div class="mono" style="font-size:20px;color:var(--ink-2);margin-top:6px">2025.10 재편 당시 지분 · MS 몫은 약 1,350억 달러어치</div>
         </div>
         <div class="src">출처: OpenAI 위키백과(기업가치 2024.10–2026.3), openai.com(2019.3 OpenAI LP), Microsoft 발표(2019.7, 2023.1, 2025.10.28), The Decoder(2026.4.27), CNBC(2026.10.31)·Bloomberg(2026.11.6 보도, 약 1조 2,500억 달러)</div>`,
+      // When the web-font stylesheet can't load (offline classroom), Chromium can leave the static chart's
+      // SVG labels laid out but unpainted. Re-laying out the chart brings them back.
+      enter(el) {
+        const s = el.querySelector('.os-val svg'); if (!s) return;
+        s.style.display = 'none'; void s.getBoundingClientRect(); s.style.display = '';
+      },
     },
     /* ═════════════════════════ 6. BOARD CRISIS ═════════════════════════ */
     {

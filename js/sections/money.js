@@ -16,6 +16,51 @@
   }
   const log10 = Math.log10;
 
+  /* Chromium paints SVG <text> with the font scale of its last layout. A chart laid out while the
+     camera was far away (the overview at load, e.g. with fallback fonts on an offline PC) can paint
+     tiny and bunched in a corner after the camera zooms in. Re-lay out the frame's SVG text on arrival. */
+  function relayoutSvgText(el) {
+    el.querySelectorAll('.stage svg').forEach((s) => {
+      if (!s.querySelector('text')) return;
+      const d = s.style.display;
+      s.style.display = 'none'; void s.getBoundingClientRect(); s.style.display = d;
+    });
+  }
+
+  /* An offline Windows PC has no Nanum Pen Script / IBM Plex: the hand font falls back to Comic Sans +
+     Malgun Gothic, much wider. Shrink the one-line labels that would then be cut or run into a line. */
+  function onFonts(fn) {
+    try { if (document.fonts) { document.fonts.ready.then(fn); document.fonts.addEventListener('loadingdone', fn); } } catch (e) { /* ignore */ }
+  }
+  // photo captions are nowrap + ellipsis: shrink caption and its <small> together until they fit
+  function fitCaps(el) {
+    el.querySelectorAll('.photo figcaption').forEach((cap) => {
+      const sm = cap.querySelector('small');
+      cap.style.fontSize = ''; if (sm) sm.style.fontSize = '';
+      const a = parseFloat(getComputedStyle(cap).fontSize), b = sm ? parseFloat(getComputedStyle(sm).fontSize) : 0;
+      for (let s = 0.95; s > 0.5 && cap.scrollWidth > cap.clientWidth + 1; s -= 0.05) {
+        cap.style.fontSize = (a * s).toFixed(1) + 'px';
+        if (sm) sm.style.fontSize = Math.max(20, b * s).toFixed(1) + 'px';
+      }
+    });
+  }
+  // SVG <text data-fit="basePx,maxWidth">: shrink until its advance fits maxWidth (user units)
+  function fitSvgText(el) {
+    el.querySelectorAll('svg text[data-fit]').forEach((t) => {
+      const [base, maxW] = t.dataset.fit.split(',').map(Number);
+      let px = base;
+      t.style.fontSize = px + 'px';
+      try { while (px > 20 && t.getComputedTextLength() > maxW) { px -= 1; t.style.fontSize = px + 'px'; } } catch (e) { /* not laid out */ }
+    });
+  }
+  // HTML one-liner (white-space:nowrap; max-width:100%): shrink until it fits its box
+  function fitLine(n, minPx) {
+    n.style.fontSize = '';
+    let px = parseFloat(getComputedStyle(n).fontSize);
+    while (px > minPx && n.scrollWidth > n.clientWidth + 1) { px -= 1; n.style.fontSize = px + 'px'; }
+  }
+  function fitFrame(el) { fitCaps(el); fitSvgText(el); }
+
   /* ════════════════ 1. gpu-why ════════════════ */
   const RACE = (function () {
     const N = 48, CELLS = N * N, CPU_W = 8, CPU_CELL = 0.028;
@@ -82,7 +127,7 @@
     // DeepSeek shock: a 5,890억 달러 drop drawn to scale on the milestone line
     const dx = x(2025.07), dy0 = y(3.59), dy1 = y(3.59 - 0.589);
     s += `<path d="M${dx},${dy0} V${dy1}" style="stroke:var(--bad);stroke-width:4;fill:none"/><path d="M${dx - 7},${dy1 - 9} L${dx},${dy1} L${dx + 7},${dy1 - 9}" style="stroke:var(--bad);stroke-width:3;fill:none"/>`;
-    s += `<text x="${dx + 8}" y="${dy1 + 24}" style="fill:var(--bad)">DeepSeek 쇼크</text><text x="${dx + 8}" y="${dy1 + 46}" style="fill:var(--bad)">하루 −5,890억 달러</text>`;
+    s += `<text x="${dx + 8}" y="${dy1 + 22}" style="fill:var(--bad)">DeepSeek 쇼크</text><text x="${dx + 8}" y="${dy1 + 46}" style="fill:var(--bad)">하루 −5,890억 달러</text>`;
     const lab = (i, ddx, ddy, anchor, t, big) => `<text x="${x(P[i][0]) + ddx}" y="${y(P[i][1]) + ddy}" text-anchor="${anchor}" class="${big ? 'big' : ''}">${t}</text>`;
     s += lab(0, 12, 26, 'start', '1조 · 2023.5');
     s += lab(1, 14, 28, 'start', '2조 · 2024.2');
@@ -131,13 +176,13 @@
       src: 'NVIDIA 실적 발표 FY2024·FY2026·FY27 2분기',
     },
     {
-      kind: 'inv', pts: [[NOD.oa.x - 18, NOD.ms.y - 40], [NOD.oa.x - 18, NOD.oa.y + 40]], lab: [NOD.oa.x - 30, 214, 'end', ['130억', '달러']],
+      kind: 'inv', pts: [[NOD.oa.x - 18, NOD.ms.y - 40], [NOD.oa.x - 18, NOD.oa.y + 40]], lab: [NOD.oa.x - 34, 214, 'end', ['130억', '달러']],
       ft: 'Microsoft → OpenAI', amt: '누적 약 130억 달러', when: '2019 · 2021 · 2023',
       li: ['10억 (2019) + 20억 (2021) + 약 100억 달러 (2023)', '2025.10.28 OpenAI 지분 27% (약 1,350억 달러어치)', 'MS는 2025.11 경쟁사 Anthropic에도 최대 50억 달러'],
       src: 'Microsoft 블로그 2023.1·2025.10.28 · Anthropic 2025.11.18',
     },
     {
-      kind: 'buy', pts: [[NOD.oa.x + 18, NOD.oa.y + 40], [NOD.oa.x + 18, NOD.ms.y - 40]], lab: [NOD.oa.x + 30, 214, 'start', ['2,500억', '달러']],
+      kind: 'buy', pts: [[NOD.oa.x + 18, NOD.oa.y + 40], [NOD.oa.x + 18, NOD.ms.y - 40]], lab: [NOD.oa.x + 34, 214, 'start', ['2,500억', '달러']],
       ft: 'OpenAI → Microsoft', amt: '2,500억 달러', when: '2025.10.28 · Azure 구매 약정',
       li: ['OpenAI가 MS 클라우드(Azure)를 더 사기로 약속', '2026.4 재계약: Azure 독점은 끝 — 다른 클라우드도 쓴다', '아마존 AWS와도 380억 달러 계약 (2025.11)'],
       src: 'Microsoft 블로그 2025.10.28 · the-decoder 2026.4 · Wikipedia OpenAI',
@@ -155,7 +200,7 @@
       src: 'Anthropic 2025.10.23 · Engadget 2026.4.20',
     },
     {
-      kind: 'inv', pts: [[NOD.cl.x, NOD.cl.y - 40], [NOD.cl.x, NOD.an.y + 40]], lab: [NOD.cl.x - 14, 236, 'end', ['260억+']],
+      kind: 'inv', pts: [[NOD.cl.x, NOD.cl.y - 40], [NOD.cl.x, NOD.an.y + 40]], lab: [NOD.cl.x - 22, 236, 'end', ['260억+']],
       ft: 'Amazon · Google → Anthropic', amt: '260억 달러+', when: '2023 → 2026.4 · 확정분 합계',
       li: ['아마존 80억 달러 (2023~2024) + 2026.4 즉시 50억 (조건부로 최대 200억 더)', '구글 20억 약정 (2023.10) + 10억 (2025.1) + 2026.4 즉시 100억 (조건부로 최대 300억 더)', '아마존은 2026년 OpenAI에도 최대 500억 달러 — 양쪽에 건다'],
       src: 'Wikipedia Anthropic · Engadget 2026.4.20 · Bloomberg·Reuters 2026.4.24 · The Next Web 2026.3',
@@ -231,7 +276,7 @@
     s += `<text x="${x(Bp[0][0]) + 12}" y="${y(Bp[0][1]) - 8}" style="fill:var(--pen)">GPT-4 · 30달러</text>`;
     s += `<text x="${x(Bp[1][0])}" y="${y(Bp[1][1]) + 32}" text-anchor="middle" style="fill:var(--pen)">GPT-5 · 1.25달러</text>`;
     s += `<text x="${x(Bp[2][0]) - 14}" y="${y(Bp[2][1]) - 4}" text-anchor="end" style="fill:var(--pen)">GPT-6 Astra · 10달러</text>`;
-    s += `<text class="hand" x="${L + 34}" y="${y(0.17)}" style="font-size:38px">2년 새 280분의 1</text>`;
+    s += `<text class="hand" data-fit="38,196" x="${L + 34}" y="${y(0.17)}" style="font-size:38px">2년 새 280분의 1</text>`;
     // legend
     const LX = 424;
     s += `<line x1="${LX}" x2="${LX + 28}" y1="${T + 6}" y2="${T + 6}" style="stroke:var(--ink);stroke-width:4"/><text x="${LX + 36}" y="${T + 12}">GPT-3.5급 실력</text>`;
@@ -271,7 +316,7 @@
     s += `<rect x="${X5}" y="${y(1800)}" width="${bw}" height="${y(0) - y(1800)}" style="fill:var(--pen-soft);stroke:var(--pen);stroke-width:3"/>`;
     s += `<text class="big" x="${X5 + bw / 2}" y="${y(1800) - 12}" text-anchor="middle" style="fill:var(--pen)">1,800억</text>`;
     s += `<text x="${X5 + bw / 2}" y="${H - 30}" text-anchor="middle" style="fill:var(--pen)">IT 외 대기업</text><text x="${X5 + bw / 2}" y="${H - 8}" text-anchor="middle" style="fill:var(--pen)">21곳 · 2026</text>`;
-    s += `<text class="hand" x="${bx(1) - 4}" y="${y(6300)}">2년 만에 약 3배</text>`;
+    s += `<text class="hand" data-fit="32,200" x="${bx(1) - 4}" y="${y(6300)}">2년 만에 약 3배</text>`;
     return s + '</svg>';
   }
   /* IEA Energy and AI (2025): 415 TWh (2024, ≈1.5% of world), 945 TWh (2030, "slightly more than
@@ -314,20 +359,22 @@
     // TSVs
     ctx.strokeStyle = C.pen; ctx.lineWidth = 2.4;
     for (let k = 0; k < 5; k++) { const xx = st.x + 26 + k * 30; ctx.beginPath(); ctx.moveTo(xx, y0 + baseH - 3); ctx.lineTo(xx, top + 3); ctx.stroke(); }
-    // labels with leader lines (left side)
-    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-    const note = (tx, ty, px, py, text, col, font) => {
-      ctx.strokeStyle = C.ink3; ctx.lineWidth = 1.6; K.sketchLine(ctx, tx, ty, px, py, { wobble: 1 });
-      ctx.fillStyle = col || C.ink; ctx.font = font || `500 22px ${C.fontBody}`;
+    // labels with leader lines (left side). A short stack (4–6 layers) is lower than the three
+    // labels need, so the labels keep a minimum spacing and their leader lines slant to the stack.
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    const RX = 160;
+    const lead = (ly, px, py) => { ctx.strokeStyle = C.ink3; ctx.lineWidth = 1.6; K.sketchLine(ctx, RX + 10, ly, px, py, { wobble: 1 }); };
+    const put = (t, y, col, wt, size) => {
+      let sz = size; ctx.font = `${wt} ${sz}px ${C.fontBody}`;
+      while (sz > 20 && ctx.measureText(t).width > RX - 4) { sz--; ctx.font = `${wt} ${sz}px ${C.fontBody}`; }
+      ctx.fillStyle = col; ctx.fillText(t, RX, y);
     };
-    const tY = top + 8;
-    note(170, tY, st.x - 6, tY, '');
-    ctx.textAlign = 'right'; ctx.fillStyle = C.ink; ctx.font = `600 24px ${C.fontBody}`; ctx.fillText(`D램 칩 × ${full}층`, 160, tY);
+    const tY = top + 8, baseY = y0 + 4;
     const tsvY = Math.min(y0 - 20, top + (y0 - top) * 0.62);
-    note(170, tsvY, st.x + 26, tsvY, '');
-    ctx.fillStyle = C.pen; ctx.font = `500 22px ${C.fontBody}`; ctx.fillText('TSV: 층을 꿰뚫는', 160, tsvY - 13); ctx.fillText('수직 통로', 160, tsvY + 14);
-    note(170, y0 + 6, st.x - 4, y0 + 6, '');
-    ctx.fillStyle = C.ink2; ctx.fillText('바닥 제어 칩', 160, y0 + 4);
+    const tsv2 = Math.min(tsvY + 14, baseY - 30), tsv1 = tsv2 - 27, dY = Math.min(tY, tsv1 - 32);
+    lead(dY, st.x - 6, tY); put(`D램 칩 × ${full}층`, dY, C.ink, 600, 24);
+    lead((tsv1 + tsv2) / 2, st.x + 26, tsvY); put('TSV: 층을 꿰뚫는', tsv1, C.pen, 500, 22); put('수직 통로', tsv2, C.pen, 500, 22);
+    lead(y0 + 6, st.x - 4, y0 + 6); put('바닥 제어 칩', baseY, C.ink2, 500, 22);
     // bottom label for interposer
     ctx.textAlign = 'center'; ctx.fillStyle = C.ink2; ctx.font = `500 21px ${C.fontBody}`;
     ctx.fillText('인터포저: GPU와 메모리를 잇는 짧고 넓은 길', w / 2, h - 10);
@@ -435,7 +482,9 @@
         });
         K.onTheme(draw);
         draw();
+        fitFrame(el); onFonts(() => fitFrame(el));
       },
+      enter(el) { relayoutSvgText(el); fitFrame(el); },
     },
 
     /* ───── 2 ───── */
@@ -543,6 +592,7 @@
         place();
         select(0);
       },
+      enter(el) { relayoutSvgText(el); },
     },
 
     /* ───── 3 ───── */
@@ -623,7 +673,9 @@
           render();
         });
         render();
+        fitFrame(el); onFonts(() => fitFrame(el));
       },
+      enter(el) { relayoutSvgText(el); fitFrame(el); },
     },
 
     /* ───── 4 ───── */
@@ -684,7 +736,7 @@
           }
           s += `<rect class="p-bar" x="${L}" y="${y}" height="${BH}" width="${sx(p.v) - L}" style="stroke-width:2.5"/>`;
           s += `<text class="vl" x="${(p.lo ? sx(p.hi) : sx(p.v)) + 12}" y="${y + TY}">${p.lo ? '약 ' : ''}${p.v.toLocaleString('ko-KR')}</text>`;
-          if (i === 1) s += `<text class="hn" x="${sx(p.v) + 80}" y="${y + TY + 1}">= 일본 한 나라 전체 + 조금</text>`;
+          if (i === 1) s += `<text class="hn" data-fit="32,${Math.floor(696 - sx(p.v) - 80)}" x="${sx(p.v) + 80}" y="${y + TY + 1}">= 일본 한 나라 전체 + 조금</text>`;
           s += '</g>';
         });
         svg.innerHTML = s;
@@ -708,7 +760,9 @@
         svg.addEventListener('click', (e) => { const r = e.target.closest('.p-row'); if (r) pick(+r.dataset.i); });
         K.loop(el, (t, dt) => { if (grow >= 1) return; grow = Math.min(1, grow + dt / 0.7); draw(); });
         pick(0); grow = 1; draw();
+        fitFrame(el); onFonts(() => fitFrame(el));
       },
+      enter(el) { relayoutSvgText(el); fitFrame(el); },
     },
 
     /* ───── 5 ───── */
@@ -740,7 +794,7 @@
           #f-korea-chips .gp{display:flex;gap:14px;margin-top:14px}
           #f-korea-chips .gp > div{display:flex;flex-direction:column;align-items:center;gap:6px}
           #f-korea-chips .gp .sq{display:flex;gap:3px}
-          #f-korea-chips .gp i{width:20px;height:20px;border:2px solid var(--ink);display:block}
+          #f-korea-chips .gp i{width:18px;height:18px;border:2px solid var(--ink);display:block}
           #f-korea-chips .gp span{font-size:20px;color:var(--ink-2);white-space:nowrap}
           #f-korea-chips .jobs{left:92px;top:748px;width:1416px;display:flex;align-items:center;gap:18px}
           #f-korea-chips .jobs .box{padding:6px 18px;font-size:24px;line-height:1.2}
@@ -796,7 +850,9 @@
         gp.innerHTML = grp.map(([nm, n, col]) => `<div><div class="sq">${('<i style="background:' + col + '"></i>').repeat(n)}</div><span>${nm} ${n}만</span></div>`).join('');
         K.onTheme(draw);
         text(); draw();
+        fitFrame(el); onFonts(() => fitFrame(el));
       },
+      enter(el) { fitFrame(el); },
     },
 
     /* ───── 6 ───── */
@@ -820,7 +876,7 @@
           #f-bubble .vote .btn b{font-family:var(--font-mono);font-size:30px}
           #f-bubble .vote .btn:hover{background:linear-gradient(var(--hl-soft),var(--hl-soft)),var(--paper)}
           #f-bubble .vote .btn:active{background:var(--ink);color:var(--paper)}
-          #f-bubble .v-msg{font-family:var(--font-hand);font-size:34px;color:var(--pen);text-align:center;min-height:38px;line-height:1.1;background:var(--paper);padding:2px 6px;align-self:center}
+          #f-bubble .v-msg{font-family:var(--font-hand);font-size:34px;color:var(--pen);text-align:center;min-height:38px;line-height:1.1;background:var(--paper);padding:2px 6px;align-self:center;white-space:nowrap;max-width:100%}
           #f-bubble .end{left:92px;right:92px;top:768px;text-align:center;font-size:54px}
         </style>
         <div class="kicker">2000년과 2026년</div>
@@ -871,6 +927,7 @@
           // the scale leans toward the heavier side: more "거품이다" votes pull the left pan down (negative angle)
           target = tot ? K.clamp(((votes[1] - votes[0]) / Math.max(4, tot)) * 7, -7, 7) : 0;
           msg.textContent = !tot ? '손 든 사람 수만큼 클릭!' : votes[0] > votes[1] ? `우리 반 ${tot}명: 거품 쪽으로 기울었다` : votes[1] > votes[0] ? `우리 반 ${tot}명: 아니다 쪽으로 기울었다` : `우리 반 ${tot}명: 팽팽하다`;
+          fitLine(msg, 20); // one line, or the vote column grows into the closing line
           K.store.set('money-bubble-vote', votes);
         };
         el.querySelector('.vote').addEventListener('click', (e) => {
@@ -886,8 +943,9 @@
         render(); ang = target; layout();
         el.__layoutScale = layout;
         K.onTheme(layout);
+        onFonts(() => fitLine(msg, 20));
       },
-      enter(el) { el.__layoutScale && el.__layoutScale(); },
+      enter(el) { relayoutSvgText(el); el.__layoutScale && el.__layoutScale(); fitLine(el.querySelector('.b-msg'), 20); },
     },
   ]);
 })();

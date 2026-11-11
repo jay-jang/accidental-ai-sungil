@@ -24,10 +24,22 @@
 
   let viewport, world, decor, gridEl, gridLayers = [];
   let vw = innerWidth, vh = innerHeight;
+  let insetB = 0; // px reserved at the bottom for the touch bar
+  const vhE = () => Math.max(120, vh - insetB);
   const cam = { x: 0, y: 0, w: DW, r: 0 };
   let flight = null;
   let worldBox = { x: -DW, y: -DH, w: DW * 2, h: DH * 2 };
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // phones and tablets: no keyboard, so show the touch bar and accept gestures
+  const TOUCH = matchMedia('(hover: none) and (pointer: coarse)').matches || (navigator.maxTouchPoints > 0 && Math.min(screen.width, screen.height) < 820);
+  Deck.touch = TOUCH;
+  function toast(msg, ms) {
+    ms = ms || 4200;
+    const t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role', 'status'); t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.classList.add('out'), ms);
+    setTimeout(() => t.remove(), ms + 700);
+  }
 
   /* ───────── zoom path (after d3-interpolate's interpolateZoom) ───────── */
   function interpolateZoom(p0, p1) {
@@ -61,7 +73,7 @@
   /* ───────── camera ───────── */
   function fitWidth(w, h, pad) {
     pad = pad || 1;
-    const A = vw / vh;
+    const A = vw / vhE();
     return (w / h > A ? w : h * A) * pad;
   }
   function camForFrame(f) {
@@ -80,7 +92,7 @@
 
   function applyCam() {
     const k = vw / cam.w;
-    world.style.transform = `translate(${vw / 2}px,${vh / 2}px) rotate(${-cam.r}deg) scale(${k}) translate(${-cam.x}px,${-cam.y}px)`;
+    world.style.transform = `translate(${vw / 2}px,${vhE() / 2}px) rotate(${-cam.r}deg) scale(${k}) translate(${-cam.x}px,${-cam.y}px)`;
     // graph paper: 4 grid levels with spacing 8·5ⁿ world units, faded by on-screen spacing
     const nmin = Math.ceil(Math.log(8 / k / 8) / Math.log(5));
     gridEl.style.transform = `rotate(${-cam.r}deg)`;
@@ -90,12 +102,24 @@
       const a = smooth(6, 30, s) * (1 - smooth(500, 1600, s));
       const L = gridLayers[j];
       if (a < 0.01) { L.style.opacity = 0; continue; }
-      const ox = (((gw / 2 - cam.x * k) % s) + s) % s, oy = (((gh / 2 - cam.y * k) % s) + s) % s;
+      const ox = (((gw / 2 - cam.x * k) % s) + s) % s, oy = (((gh / 2 - insetB / 2 - cam.y * k) % s) + s) % s;
       L.style.opacity = (a * (0.55 + 0.45 * Math.min(1, j / 2))).toFixed(3);
       L.style.backgroundSize = `${s}px ${s}px`;
       L.style.backgroundPosition = `${ox}px ${oy}px`;
     }
     if (minimapOn()) drawMinimap();
+    placeFocus();
+  }
+  // on phones the screen is rarely 16:9, so neighbours crowd the edges: veil everything outside the current frame
+  let focusEl = null;
+  function placeFocus() {
+    if (!focusEl) return;
+    const f = Deck.frames[Deck.idx];
+    const show = TOUCH && f && !f.view && !Deck.free && !Deck.overview && !flight;
+    focusEl.classList.toggle('on', !!show);
+    if (!show) return;
+    const k = vw / cam.w, w = DW * f.s * k, h = DH * f.s * k;
+    focusEl.style.cssText = `left:${vw / 2 - w / 2}px;top:${vhE() / 2 - h / 2}px;width:${w}px;height:${h}px`;
   }
   function smooth(a, b, x) { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
 
@@ -104,8 +128,8 @@
     if (flight) cancelAnimationFrame(flight.raf);
     const from = { ...cam };
     if (opts.instant || reduced) {
-      Object.assign(cam, target); applyCam(); world.classList.remove('moving');
-      flight = null; opts.done && opts.done(); return;
+      flight = null; Object.assign(cam, target); applyCam(); world.classList.remove('moving');
+      opts.done && opts.done(); return;
     }
     const zi = interpolateZoom([from.x, from.y, from.w], [target.x, target.y, target.w]);
     let dr = (target.r - from.r) % 360; if (dr > 180) dr -= 360; if (dr < -180) dr += 360;
@@ -119,14 +143,14 @@
       cam.x = p[0]; cam.y = p[1]; cam.w = p[2]; cam.r = from.r + dr * e;
       applyCam();
       if (t < 1) flight.raf = requestAnimationFrame(tick);
-      else { cam.r = target.r; applyCam(); world.classList.remove('moving'); flight = null; opts.done && opts.done(); }
+      else { cam.r = target.r; flight = null; applyCam(); world.classList.remove('moving'); opts.done && opts.done(); }
     };
     flight.raf = requestAnimationFrame(tick);
   }
 
   function screenToWorld(sx, sy) {
     const k = vw / cam.w, a = (cam.r * Math.PI) / 180;
-    const dx = (sx - vw / 2) / k, dy = (sy - vh / 2) / k;
+    const dx = (sx - vw / 2) / k, dy = (sy - vhE() / 2) / k;
     return { x: cam.x + dx * Math.cos(a) - dy * Math.sin(a), y: cam.y + dx * Math.sin(a) + dy * Math.cos(a) };
   }
 
@@ -324,9 +348,12 @@
       <div id="hud-where"><span id="hud-lec"></span><b id="hud-title"></b></div>
       <div id="hud-progress" title="클릭해서 이동"><div class="track"></div><div class="fill"></div><div class="tip"></div></div>
       <div id="hud-right">
+        <button class="hud-btn" id="hud-prev" title="이전 (←)" aria-label="이전">‹</button>
         <span id="hud-count"></span>
+        <button class="hud-btn" id="hud-next" title="다음 (→)" aria-label="다음">›</button>
         <span id="hud-timer" title="클릭: 시작/일시정지 · 더블클릭: 초기화"></span>
         <button class="hud-btn" id="hud-map" title="전체 지도 (O)">지도</button>
+        <button class="hud-btn" id="hud-toc" title="목차 (G)">목차</button>
         <button class="hud-btn" id="hud-notes" title="발표자 노트 (N)">노트</button>
         <button class="hud-btn" id="hud-help" title="단축키 (H)">?</button>
       </div>`;
@@ -335,10 +362,60 @@
     const notes = document.createElement('aside'); notes.id = 'notes'; notes.setAttribute('aria-label', '발표자 노트'); document.body.appendChild(notes);
     const mm = document.createElement('canvas'); mm.id = 'minimap'; mm.hidden = true; document.body.appendChild(mm);
     const hint = document.createElement('div'); hint.id = 'hint'; hint.className = 'hud';
-    hint.textContent = '→ 다음 · ← 이전 · O 전체 지도 · N 노트 · H 도움말';
+    hint.textContent = TOUCH ? '옆으로 밀어 넘기기 · 두 손가락으로 확대 · 두 번 탭하면 크게' : '→ 다음 · ← 이전 · O 전체 지도 · G 목차 · N 노트 · H 도움말 · 마우스를 아래로 = 진행 막대';
     document.body.appendChild(hint);
     setTimeout(() => (hint.style.opacity = 0), 7000);
-    H = { bar, cap, notes, mm, hint, lec: bar.querySelector('#hud-lec'), title: bar.querySelector('#hud-title'), count: bar.querySelector('#hud-count'), timer: bar.querySelector('#hud-timer'), prog: bar.querySelector('#hud-progress') };
+
+    // touch bar: the keyboard-free way through the deck (phones, tablets)
+    const tb = document.createElement('nav');
+    tb.id = 'touchbar'; tb.setAttribute('aria-label', '장 이동');
+    tb.innerHTML = `<i class="tb-prog"></i>
+      <button id="tb-prev" aria-label="이전 장">‹ 이전</button>
+      <button id="tb-toc" aria-label="목차 열기">목차</button>
+      <span id="tb-count" aria-live="polite"></span>
+      <button id="tb-map" aria-label="전체 지도">지도</button>
+      <button id="tb-next" aria-label="다음 장">다음 ›</button>`;
+    document.body.appendChild(tb);
+    tb.querySelector('#tb-prev').onclick = () => Deck.prev();
+    tb.querySelector('#tb-next').onclick = () => Deck.next();
+    tb.querySelector('#tb-map').onclick = () => Deck.toggleOverview();
+    tb.querySelector('#tb-toc').onclick = () => toggleToc();
+
+    // table of contents (all devices)
+    const toc = document.createElement('aside');
+    toc.id = 'toc'; toc.setAttribute('aria-label', '목차');
+    let tocHTML = `<header><b>목차</b><span class="toc-meta">${Deck.frames.length}장</span>
+      <button class="hud-btn" id="toc-theme" title="밝은/어두운 테마">테마</button>
+      <button class="hud-btn" id="toc-compact" title="보충 장 건너뛰기">압축</button>
+      <button class="hud-btn" id="toc-notes" title="발표자 노트">노트</button>
+      <button class="hud-btn" id="toc-help" title="사용법">?</button>
+      <button class="hud-btn" id="toc-close" aria-label="목차 닫기">닫기</button></header><div class="toc-list" data-scroll>`;
+    Deck.SECTIONS.forEach((sec) => {
+      if (!sec.frames.length) return;
+      const head = sec.hub === false ? (sec.id === 'opening' ? '시작' : '마무리') : sec.title;
+      tocHTML += `<div class="toc-sec">${sec.lecture}교시<b>${stripTags(head)}</b></div>`;
+      sec.frames.forEach((f) => {
+        tocHTML += `<button class="toc-row" data-idx="${f.idx}"><span class="n">${f.idx + 1}</span><span class="t">${stripTags(f.hub ? '— 구역 전체 보기' : f.title || f.id)}</span>${f.optional ? '<span class="o">보충</span>' : ''}</button>`;
+      });
+    });
+    toc.innerHTML = tocHTML + '</div>';
+    document.body.appendChild(toc);
+    toc.addEventListener('click', (e) => {
+      const r = e.target.closest('.toc-row');
+      if (r) { toggleToc(false); Deck.go(+r.dataset.idx); }
+    });
+    toc.querySelector('#toc-close').onclick = () => toggleToc(false);
+    toc.querySelector('#toc-theme').onclick = () => toggleTheme();
+    toc.querySelector('#toc-compact').onclick = () => { Deck.compact = !Deck.compact; Kit.store.set('compact', Deck.compact); updateHUD(); };
+    toc.querySelector('#toc-notes').onclick = () => { toggleToc(false); toggleNotes(); };
+
+    focusEl = document.createElement('div'); focusEl.id = 'focus'; focusEl.setAttribute('aria-hidden', 'true'); document.body.appendChild(focusEl);
+    toc.querySelector('#toc-help').onclick = () => { toggleToc(false); toggleHelp(); };
+    if (TOUCH) {
+      toast('아래 버튼이나 옆으로 밀어서 넘겨요 · 두 손가락으로 확대');
+      if (innerHeight > innerWidth) setTimeout(() => toast('휴대폰을 가로로 돌리면 더 크게 보여요'), 5200);
+    }
+    H = { bar, cap, notes, mm, hint, tb, toc, lec: bar.querySelector('#hud-lec'), title: bar.querySelector('#hud-title'), count: bar.querySelector('#hud-count'), timer: bar.querySelector('#hud-timer'), prog: bar.querySelector('#hud-progress') };
 
     // progress ticks at section starts
     const P = Deck.frames, n = P.length;
@@ -360,6 +437,9 @@
       Deck.go(Math.round(((e.clientX - r.left) / r.width) * (n - 1)));
     });
     bar.querySelector('#hud-map').onclick = () => Deck.toggleOverview();
+    bar.querySelector('#hud-prev').onclick = () => Deck.prev();
+    bar.querySelector('#hud-next').onclick = () => Deck.next();
+    bar.querySelector('#hud-toc').onclick = () => toggleToc();
     bar.querySelector('#hud-notes').onclick = () => toggleNotes();
     bar.querySelector('#hud-help').onclick = () => toggleHelp();
     H.timer.onclick = () => {
@@ -379,13 +459,27 @@
     });
 
     // idle-hide
-    let idleT = 0;
-    const wake = () => {
-      document.querySelectorAll('.hud').forEach((h) => h.classList.remove('idle'));
+    let idleT = 0, leaving = false;
+    const hideLater = (ms) => {
       clearTimeout(idleT);
-      idleT = setTimeout(() => document.querySelectorAll('.hud').forEach((h) => { if (!h.matches(':hover')) h.classList.add('idle'); }), 2800);
+      idleT = setTimeout(() => document.querySelectorAll('.hud').forEach((h) => { if (!h.matches(':hover')) h.classList.add('idle'); }), ms);
     };
-    addEventListener('mousemove', wake); addEventListener('keydown', wake); wake();
+    const wake = () => {
+      leaving = false;
+      document.querySelectorAll('.hud').forEach((h) => h.classList.remove('idle'));
+      hideLater(2800);
+    };
+    // The bar sits over the frame's bottom edge (the 출처 line), so it only wakes when the
+    // pointer comes down to it or for non-navigation keys — not while using a demo or paging.
+    const nearBar = (e) => e.clientY > innerHeight - Math.max(110, innerHeight * 0.13) || !!(e.target && e.target.closest && e.target.closest('.hud'));
+    const NAV_KEYS = new Set(['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown', 'PageDown', 'PageUp', ' ', 'Home', 'End', 'Shift', 'Control', 'Alt', 'Meta']);
+    addEventListener('mousemove', (e) => {
+      if (nearBar(e)) wake();
+      else if (!leaving && !bar.classList.contains('idle')) { leaving = true; hideLater(900); }
+    });
+    addEventListener('keydown', (e) => { if (!NAV_KEYS.has(e.key)) wake(); });
+    addEventListener('pointerdown', (e) => { if (e.pointerType !== 'mouse' || nearBar(e)) wake(); });
+    wake();
   }
   const stripTags = (s) => String(s).replace(/<[^>]+>/g, '');
 
@@ -408,12 +502,18 @@
     H.bar.querySelector('#hud-map').classList.toggle('on', Deck.overview);
     // caption for virtual frames and overview
     let cap = '';
-    if (Deck.overview) cap = `전체 지도<small>가고 싶은 곳을 클릭 · O 또는 Esc로 돌아가기</small>`;
+    if (Deck.overview) cap = TOUCH ? `전체 지도<small>가고 싶은 곳을 탭하세요</small>` : `전체 지도<small>가고 싶은 곳을 클릭 · O 또는 Esc로 돌아가기</small>`;
     else if (f.view && f.caption) cap = f.caption;
     H.cap.innerHTML = cap;
+    H.tb.querySelector('#tb-count').textContent = `${f.idx + 1}/${n}${sub}`;
+    H.tb.querySelector('.tb-prog').style.width = (f.idx / (n - 1)) * 100 + '%';
+    H.tb.querySelector('#tb-map').classList.toggle('on', Deck.overview);
+    H.toc.querySelector('#toc-compact').classList.toggle('on', Deck.compact);
+    H.toc.querySelectorAll('.toc-row').forEach((r) => r.classList.toggle('cur', +r.dataset.idx === f.idx));
     renderNotes();
     updateTimer();
     syncPresenter();
+    placeFocus();
     H.mm.hidden = !minimapOn();
     if (minimapOn()) drawMinimap();
   }
@@ -441,7 +541,7 @@
       ctx.restore();
     }
     // view rectangle
-    const k = vw / cam.w, vwW = vw / k, vhW = vh / k;
+    const k = vw / cam.w, vwW = vw / k, vhW = vhE() / k;
     ctx.save(); ctx.translate((cam.x - worldBox.x) * s, (cam.y - worldBox.y) * s); ctx.rotate((cam.r * Math.PI) / 180);
     ctx.strokeStyle = C.pen; ctx.lineWidth = 1.5; ctx.strokeRect((-vwW / 2) * s, (-vhW / 2) * s, vwW * s, vhW * s);
     ctx.restore();
@@ -457,6 +557,13 @@
       ${body}
       <div class="next">다음 → ${nf ? `${nf.idx + 1}. ${stripTags(nf.title || nf.id)}` : '끝'}</div>`;
   }
+  function toggleToc(force) {
+    const open = force == null ? !H.toc.classList.contains('open') : force;
+    H.toc.classList.toggle('open', open);
+    H.bar.querySelector('#hud-toc').classList.toggle('on', open);
+    if (open) { const c = H.toc.querySelector('.toc-row.cur'); if (c) c.scrollIntoView({ block: 'center' }); }
+  }
+  Deck.toggleToc = toggleToc;
   function toggleNotes(force) {
     const open = force == null ? !H.notes.classList.contains('open') : force;
     H.notes.classList.toggle('open', open);
@@ -475,9 +582,16 @@
       ['마우스 휠 · 드래그', '자유롭게 확대·이동 (→ 누르면 경로로 복귀)'], ['다른 프레임 클릭', '그 장으로 바로 이동'],
       ['숫자 + Enter', '해당 번호의 장으로 이동'], ['Home / End', '처음 / 마지막'], ['N', '발표자 노트'], ['P', '발표자 창 (듀얼 모니터)'],
       ['F', '전체 화면'], ['T', '밝은/어두운 테마'], ['B', '화면 가리기'], ['M', '미니맵 고정'], ['S', '압축 모드: 보충 장 건너뛰기'],
+      ['마우스를 화면 아래로', '진행 막대 · ‹ › 버튼 · 타이머 · 지도/목차/노트 버튼'],
       ['타이머 클릭', '교시별 타이머 시작/정지 · 더블클릭 초기화'],
     ];
-    overlay.innerHTML = `<div class="sheet" role="dialog" aria-label="단축키"><h3>발표 단축키</h3><table>${rows.map((r) => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('')}</table></div>`;
+    const touchRows = [
+      ['‹ 이전 · 다음 ›', '아래 막대의 버튼으로 한 장씩 (단계가 있으면 한 단계씩)'], ['옆으로 밀기', '왼쪽으로 밀면 다음, 오른쪽으로 밀면 이전'],
+      ['두 손가락 벌리기', '확대하고 한 손가락으로 끌어 보기'], ['두 번 탭', '그 자리를 크게 보기 · 다시 두 번 탭하면 원래대로'],
+      ['목차', '원하는 장으로 바로 이동'], ['지도', '전체 지도에서 장을 탭해 이동'],
+    ];
+    const list = TOUCH ? touchRows : rows.concat([['G', '목차']]);
+    overlay.innerHTML = `<div class="sheet" role="dialog" aria-label="${TOUCH ? '사용법' : '단축키'}"><h3>${TOUCH ? '터치로 보는 법' : '발표 단축키'}</h3><table>${list.map((r) => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('')}</table></div>`;
     overlay.addEventListener('click', closeOverlay);
     document.body.appendChild(overlay);
   }
@@ -561,6 +675,7 @@
     if (e.key === 'Escape') {
       if (typing || (a && a !== document.body && a.closest && a.closest('.frame'))) { a.blur(); e.preventDefault(); return; }
       if (closeOverlay()) return;
+      if (H.toc.classList.contains('open')) { toggleToc(false); return; }
       if (blackout) { toggleBlackout(); return; }
       if (H.notes.classList.contains('open')) { toggleNotes(false); return; }
       if (Deck.free) { Deck.go(Deck.idx); return; }
@@ -585,6 +700,7 @@
       case 't': case 'T': toggleTheme(); break;
       case 'b': case 'B': case '.': toggleBlackout(); break;
       case 'h': case 'H': case '?': toggleHelp(); break;
+      case 'g': case 'G': toggleToc(); break;
       case 'm': case 'M': minimapPinned = !minimapPinned; Kit.store.set('minimap', minimapPinned); updateHUD(); break;
       case 's': case 'S': Deck.compact = !Deck.compact; Kit.store.set('compact', Deck.compact); updateHUD(); break;
       case 'p': case 'P': openPresenter(); break;
@@ -602,6 +718,7 @@
     addEventListener('keydown', onKey);
     addEventListener('resize', () => {
       vw = innerWidth; vh = innerHeight;
+      insetB = TOUCH && H.tb ? H.tb.offsetHeight : 0;
       if (Deck.overview) Object.assign(cam, worldCam());
       else if (!Deck.free) Object.assign(cam, camForFrame(Deck.frames[Deck.idx]));
       applyCam();
@@ -629,41 +746,92 @@
       applyCam();
     }, { passive: false });
 
-    let drag = null;
+    let drag = null, pinch = null, lastTap = null, lastType = 'mouse';
+    const touches = new Map();
+    const enterFree = () => {
+      if (flight) { cancelAnimationFrame(flight.raf); flight = null; world.classList.remove('moving'); }
+      if (!Deck.free) { Deck.free = true; stopLoops(); updateHUD(); }
+    };
+    const maxW = () => worldCam().w * 2.5;
+    const pinchState = () => { const [a, b] = [...touches.values()]; return { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 }; };
     viewport.addEventListener('pointerdown', (e) => {
+      lastType = e.pointerType;
+      if (e.pointerType === 'touch') {
+        touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (touches.size === 2) { // two fingers anywhere = zoom, even over a demo
+          const p = pinchState();
+          pinch = { d0: p.d, w0: cam.w, wp: screenToWorld(p.mx, p.my) };
+          drag = null; lastTap = null; enterFree(); return;
+        }
+        if (touches.size > 2) return;
+      }
       if (e.button !== 0) return;
       if (e.target.closest && e.target.closest(INTERACTIVE)) return;
-      drag = { x: e.clientX, y: e.clientY, t: performance.now(), moved: false, type: e.pointerType, cx: cam.x, cy: cam.y };
+      drag = { x: e.clientX, y: e.clientY, t: performance.now(), moved: false, pan: false, type: e.pointerType, cx: cam.x, cy: cam.y };
     });
     addEventListener('pointermove', (e) => {
+      if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinch && touches.size === 2) {
+        const p = pinchState();
+        cam.w = Math.max(160, Math.min(maxW(), (pinch.w0 * pinch.d0) / p.d));
+        const now = screenToWorld(p.mx, p.my);
+        cam.x += pinch.wp.x - now.x; cam.y += pinch.wp.y - now.y;
+        applyCam(); return;
+      }
       if (!drag) return;
       const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
-      if (!drag.moved && Math.hypot(dx, dy) > 5) {
+      if (!drag.moved && Math.hypot(dx, dy) > 6) {
         drag.moved = true;
-        if (drag.type !== 'touch') { viewport.classList.add('panning'); if (!Deck.free) { Deck.free = true; stopLoops(); updateHUD(); } if (flight) { cancelAnimationFrame(flight.raf); flight = null; world.classList.remove('moving'); } }
+        // the mouse always pans; a finger pans only once you have zoomed in (otherwise it is a swipe)
+        drag.pan = drag.type !== 'touch' || Deck.free || Deck.overview;
+        if (drag.pan) { viewport.classList.add('panning'); enterFree(); drag.cx = cam.x; drag.cy = cam.y; drag.x = e.clientX; drag.y = e.clientY; }
       }
-      if (drag.moved && drag.type !== 'touch') {
+      if (drag.moved && drag.pan) {
         const k = vw / cam.w, a = (cam.r * Math.PI) / 180;
-        const wx = dx / k, wy = dy / k;
+        const wx = (e.clientX - drag.x) / k, wy = (e.clientY - drag.y) / k;
         cam.x = drag.cx - (wx * Math.cos(a) - wy * Math.sin(a));
         cam.y = drag.cy - (wx * Math.sin(a) + wy * Math.cos(a));
         applyCam();
       }
     });
-    addEventListener('pointerup', (e) => {
+    const release = (e, cancelled) => {
+      touches.delete(e.pointerId);
+      if (pinch) { if (touches.size < 2) { pinch = null; drag = null; } return; }
       if (!drag) return;
       const d = drag; drag = null; viewport.classList.remove('panning');
+      if (cancelled) return;
       const dx = e.clientX - d.x, dy = e.clientY - d.y, dt = performance.now() - d.t;
-      if (d.type === 'touch' && d.moved) {
-        if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) && dt < 600) { dx < 0 ? Deck.next() : Deck.prev(); }
+      if (d.moved) {
+        if (d.type === 'touch' && !d.pan && Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.2 && dt < 800) { dx < 0 ? Deck.next() : Deck.prev(); }
         return;
       }
-      if (d.moved) return;
-      const f = frameAt(e.clientX, e.clientY);
-      const cur = Deck.frames[Deck.idx];
+      const f = frameAt(e.clientX, e.clientY), cur = Deck.frames[Deck.idx];
+      if (d.type === 'touch') {
+        const now = performance.now();
+        if (lastTap && now - lastTap.t < 330 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 40) {
+          lastTap = null;
+          if (Deck.free) { Deck.go(Deck.idx); return; } // double tap again: back to the whole frame
+          if (Deck.overview) return;
+          const before = screenToWorld(e.clientX, e.clientY);
+          const target = { ...cam, w: Math.max(160, cam.w / 2.4) };
+          const k2 = vw / target.w, a = (cam.r * Math.PI) / 180;
+          const ddx = (e.clientX - vw / 2) / k2, ddy = (e.clientY - vhE() / 2) / k2;
+          target.x = before.x - (ddx * Math.cos(a) - ddy * Math.sin(a));
+          target.y = before.y - (ddx * Math.sin(a) + ddy * Math.cos(a));
+          enterFree(); flyTo(target, { speed: 0.6 });
+          return;
+        }
+        lastTap = { t: now, x: e.clientX, y: e.clientY };
+        // a single tap only travels to another frame (or out of the map); zoomed-in reading stays put
+        if (f && (f !== cur || Deck.overview)) Deck.go(f.idx);
+        return;
+      }
       if (f && (f !== cur || Deck.free || Deck.overview)) Deck.go(f.idx);
-    });
+    };
+    addEventListener('pointerup', (e) => release(e, false));
+    addEventListener('pointercancel', (e) => release(e, true));
     viewport.addEventListener('dblclick', (e) => {
+      if (lastType === 'touch') return;
       if (e.target.closest && e.target.closest(INTERACTIVE)) return;
       const f = frameAt(e.clientX, e.clientY); if (f) Deck.go(f.idx);
     });
@@ -687,7 +855,9 @@
     decor = Deck.Layout.decor(Deck.SECTIONS, Deck.frames, worldBox);
     world.appendChild(decor);
     buildDOM();
+    document.body.classList.toggle('touch', TOUCH);
     buildHUD();
+    insetB = TOUCH ? H.tb.offsetHeight : 0;
     bindInput();
     const id = decodeURIComponent(location.hash.slice(1));
     const start = Deck.byId[id] || Deck.frames[parseInt(id, 10) - 1] || Deck.frames[0];

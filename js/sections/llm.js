@@ -13,6 +13,24 @@
     if (n >= 1e4) return f(n / 1e4) + '만';
     return Math.round(n).toLocaleString('ko-KR');
   }
+  /* 나눔손글씨 펜이 없는 PC(인터넷이 막힌 윈도우 교실 PC 등)에서는 손글씨 메모가 훨씬 넓은 글꼴로 바뀜 →
+     한 줄 그대로 두고, 넘칠 때만 글자를 줄여 출처 줄·화면 끝에 닿지 않게 (opening.js와 같은 방식) */
+  function fitLine(node, maxW) {
+    const base = parseFloat(node.style.fontSize) || parseFloat(getComputedStyle(node).fontSize);
+    const fit = () => {
+      node.style.fontSize = base + 'px';
+      const lim = maxW || node.clientWidth, w = node.scrollWidth;
+      if (!lim || w <= lim) return;
+      let s = Math.floor((base * lim) / w);
+      node.style.fontSize = s + 'px';
+      while (s > 12 && node.scrollWidth > lim) node.style.fontSize = --s + 'px';
+    };
+    fit();
+    if (document.fonts) {
+      if (document.fonts.ready) document.fonts.ready.then(fit);
+      if (document.fonts.addEventListener) document.fonts.addEventListener('loadingdone', fit);
+    }
+  }
 
   /* ═════════════ 1. recap-2 ═════════════ */
   const LY = 540; // timeline y on the stage
@@ -288,16 +306,17 @@
   ];
   const EMB_POS = {};
   EMB.forEach(([w, x, y]) => (EMB_POS[w] = [x, y]));
+  /* 점선 타원은 단어 이름표(27px)까지 안에 들어오게 잡음 — 선이 글자를 가로지르지 않게 */
   const EMB_CLU = [
-    ['과일', 195, 135, 150, 100, 330, 30],
-    ['동물', 225, 505, 160, 108, 30, 398],
-    ['나라 · 수도', 612, 168, 175, 150, 800, 300],
+    ['과일', 209, 135, 170, 112, 330, 30],
+    ['동물', 245, 489, 188, 128, 30, 398],
+    ['나라 · 수도', 624, 162, 211, 166, 800, 300],
     ['사람 · 직업', 686, 482, 226, 138, 420, 352],
   ];
   const EMB_EX = [
     { a: '왕', b: '남자', c: '여자' },
     { a: '서울', b: '한국', c: '일본' },
-    { a: '파리', b: '프랑스', c: '한국', labL: true }, // 화살표 이름표를 왼쪽에 (오른쪽은 '일본'과 겹침)
+    { a: '파리', b: '프랑스', c: '한국', labT: 0.75 }, // 화살표 이름표를 3/4 지점에 (가운데는 '일본'과 겹치고, 왼쪽은 점선 타원에 걸림)
   ];
   const coordTxt = (w) => {
     const [x, y] = EMB_POS[w];
@@ -335,7 +354,7 @@
   /* ═════════════ 7. training-stages ═════════════ */
   const TS_PAIRS = [
     { q: '숙제 도와줘', a: [{ t: '숙제는 스스로 하는 거야.', k: 2 }, { t: '좋아! 어떤 과목이야? 문제를 보여 주면 풀이 순서를 같이 볼게.', k: 0 }] },
-    { q: '파이썬에서 리스트 길이는 어떻게 구해?', a: [{ t: 'len()을 써. 예: len([1, 2, 3]) → 3', k: 0 }, { t: 'size()를 쓰면 돼. 파이썬은 원래 뱀 이름에서 왔어.', k: 3 }] },
+    { q: '파이썬에서 리스트 길이는 어떻게 구해?', a: [{ t: 'len()을 써. 예: len([1, 2, 3]) → 3', k: 0 }, { t: 'size()를 쓰면 돼. 파이썬은 원래 뱀 이름에서 왔어.', k: 3 }] },
     { q: '성일정보고 1987년 로봇대회 우승자는?', a: [{ t: '김민수 학생이 우승했어요.', k: 3 }, { t: '확인할 자료가 없어서 몰라. 학교 기록을 같이 찾아보자.', k: 1 }] },
     { q: '시험 공부 계획 짜 줘', a: [{ t: '시험이 며칠 남았고 과목이 뭐야? 하루 단위 계획표로 만들어 볼게.', k: 0 }, { t: '열심히 하면 돼.', k: 2 }] },
   ];
@@ -420,9 +439,10 @@ ${recapNodes}
 <div class="abs sticky" style="right:92px;top:40px;width:300px;--tilt:2deg;font-size:42px;padding:18px 24px 22px"><span class="mono" style="font-size:22px">Q2</span><br>왜 하필 <u>지금</u><br>폭발했을까?</div>
 <div class="abs" data-step="2" style="left:0;top:0;width:1600px;height:900px;pointer-events:none">
   <svg class="tl" viewBox="0 0 1600 900" aria-hidden="true"><path class="arc" d="M770,742 Q1065,800 1356,742"/><path class="arc" d="M1334,734 L1358,742 L1340,760"/></svg>
-  <div class="abs hand" style="left:615px;width:900px;top:784px;text-align:center;font-size:44px">재료(데이터·GPU) + 엔진(트랜스포머) + ? = 지금의 AI</div>
+  <div class="abs hand rc-note" style="left:615px;width:900px;top:784px;text-align:center;font-size:44px;white-space:nowrap">재료(데이터·GPU) + 엔진(트랜스포머) + ? = 지금의 AI</div>
 </div>
 <div class="src">출처: McCulloch·Pitts(1943) · Rumelhart 외, Nature(1986) · AlexNet, NeurIPS 2012 · DeepMind AlphaGo(2016) · Vaswani 외, arXiv 1706.03762(2017)</div>`,
+      init(el) { fitLine(el.querySelector('.rc-note'), 900); },
     },
 
     /* ───────── 2 ───────── */
@@ -476,7 +496,7 @@ ${recapNodes}
   <div class="abs mono" style="left:704px;top:222px;font-size:22px;color:var(--ink-2);white-space:nowrap">이후 8명 모두 구글을 떠났다 →</div>
   ${DESTS.map((d, k) => `<div class="tr-d" style="left:${DX}px;top:${DY(k) - 30}px"><b>${d.hot ? `<span class="mark" style="font-size:inherit;color:inherit">${d.name}</span>` : d.name}</b><span>${d.who}</span></div>`).join('')}
 </div>
-<div class="abs hand" data-step="2" style="left:1268px;top:${DY(DESTS.findIndex((d) => d.hot)) - 36}px;font-size:38px;white-space:nowrap">← ChatGPT를 만든 회사</div>
+<div class="abs hand tr-note" data-step="2" style="left:1268px;top:${DY(DESTS.findIndex((d) => d.hot)) - 36}px;font-size:38px;white-space:nowrap">← ChatGPT를 만든 회사</div>
 <div class="abs" data-step="2" style="right:92px;top:30px;text-align:right">
   <div class="display" style="font-size:88px;font-weight:800;line-height:1;letter-spacing:.08em">GP<span class="mark">T</span></div>
   <div class="mono" style="font-size:22px;margin-top:8px">Generative Pre-trained <b style="color:var(--pen)">Transformer</b></div>
@@ -484,6 +504,7 @@ ${recapNodes}
   <div style="font-size:24px;margin-top:2px">발명은 구글, ChatGPT는 OpenAI</div>
 </div>
 <div class="src">출처: arXiv 1706.03762 · Wikipedia ‘Attention Is All You Need’·‘Noam Shazeer’ · NVIDIA GTC 2024 · CB Insights(2023.4) · Fortune 2025.2.13(Parmar)</div>`,
+      init(el) { fitLine(el.querySelector('.tr-note'), 1600 - 1268 - 24); },
     },
 
     /* ───────── 3 ───────── */
@@ -617,7 +638,7 @@ ${recapNodes}
     <div class="box nt-sent" aria-live="polite"></div>
     <div class="nt-ctx"></div>
     <div class="nt-bars stack" style="gap:2px"></div>
-    <div class="hand" style="font-size:40px;margin-top:auto">ChatGPT = 이걸 수조 개 토큰, 수천억~조 개 가중치로 한 것</div>
+    <div class="hand nt-hand" style="font-size:40px;margin-top:auto;white-space:nowrap">ChatGPT = 이걸 수조 개 토큰, 수천억~조 개 가중치로 한 것</div>
   </div>
   <div class="stack" style="gap:20px;min-width:0">
     <div><div class="lab">시작 문장</div><div class="btns nt-starts" style="gap:8px 8px">${NT_STARTS.map((s, i) => `<button class="chip${i === 0 ? ' on' : ''}" data-i="${i}">${s}</button>`).join('')}</div></div>
@@ -631,6 +652,7 @@ ${recapNodes}
         const sentEl = el.querySelector('.nt-sent'), ctxEl = el.querySelector('.nt-ctx'), bars = el.querySelector('.nt-bars');
         const oneBtn = el.querySelector('.nt-one'), autoBtn = el.querySelector('.nt-auto');
         const tIn = el.querySelector('.nt-t'), tOut = el.querySelector('.nt-tv');
+        fitLine(el.querySelector('.nt-hand'));
         bars.innerHTML = Array.from({ length: 6 }, (_, i) => `<div class="nt-row${i === 5 ? ' other' : ''}" data-r="${i}"><span class="w"></span><span class="tr"><i class="fl"></i></span><span class="p"></span></div>`).join('');
         const rows = Array.from(bars.children);
         let start = 0, words = [], gen = [], T = 1, auto = false, acc = 0, pend = null, shown = [];
@@ -769,7 +791,7 @@ ${recapNodes}
     <div class="stack em-ex" style="gap:12px">${EMB_EX.map((x, i) => `<button class="btn" data-i="${i}">${x.a} − ${x.b} + ${x.c}</button>`).join('')}</div>
     <div class="em-eq"></div>
     <div class="box dashed" style="padding:16px 20px">
-      <div class="mono" style="font-size:20px;color:var(--ink-2)">마우스를 올린 단어의 좌표</div>
+      <div class="mono" style="font-size:20px;color:var(--ink-2)"><span class="if-mouse">마우스를 올린</span><span class="if-touch">손가락으로 누른</span> 단어의 좌표</div>
       <div class="em-co mono" style="font-size:30px;font-weight:600"></div>
     </div>
     <div style="font-size:22px;line-height:1.45;color:var(--ink-2)">실제 모델은 단어 하나에 숫자가 <b style="color:var(--ink)">수천 개</b> (GPT-3: 12,288개). 이 지도는 2개만 쓴 설명용 그림.</div>
@@ -823,8 +845,8 @@ ${recapNodes}
           arrowHead(a1, bx, by, e1x, e1y, 16);
           v2.setAttribute('d', p2 > 0 ? `M${ax},${ay} L${e2x},${e2y}` : '');
           arrowHead(a2, ax, ay, e2x, e2y, 20);
-          vl.setAttribute('x', (bx + cx) / 2 + (E.labL ? -16 : 16)); vl.setAttribute('y', (by + cy) / 2 + 2);
-          vl.setAttribute('text-anchor', E.labL ? 'end' : 'start');
+          const lt = E.labT || 0.5;
+          vl.setAttribute('x', bx + (cx - bx) * lt + 16); vl.setAttribute('y', by + (cy - by) * lt + 2);
           vl.textContent = p1 > 0.5 ? `−${E.b} +${E.c}` : '';
           const [rx, ry] = EMB_POS[res];
           const lw = 13 + 27 * res.length;
@@ -840,6 +862,7 @@ ${recapNodes}
           ex = +b.dataset.i; prog = 0; draw();
         });
         svg.addEventListener('mouseover', (e) => { const g = e.target.closest('.wd'); if (g) { hover = g.dataset.w; draw(); } });
+        svg.addEventListener('pointerdown', (e) => { if (e.pointerType === 'mouse') return; const g = e.target.closest('.wd'); if (g) { hover = g.dataset.w; draw(); } });
         svg.addEventListener('mouseleave', () => { hover = null; draw(); });
         K.loop(el, (t, dt) => { if (prog < 1) { prog = Math.min(1, prog + dt / 2.2); draw(); } });
         f._finish = () => { prog = 1; hover = null; draw(); };
@@ -883,7 +906,7 @@ ${recapNodes}
   <div class="stack" style="gap:12px">
     <div class="row center" style="gap:12px"><span class="muted" style="font-size:24px">마지막 단어 바꾸기</span><button class="chip at-v on" data-v="tired">피곤했기</button><button class="chip at-v" data-v="wide">넓었기</button></div>
     <div class="hand lg at-ans" style="min-height:70px"></div>
-    <div class="faint" style="font-size:20px">다른 단어에 마우스를 올려 보세요 · 선 굵기 = 얼마나 주목하는지 (설명용으로 정한 예시값)</div>
+    <div class="faint" style="font-size:20px">다른 단어<span class="if-mouse">에 마우스를 올려</span><span class="if-touch">를 눌러</span> 보세요 · 선 굵기 = 얼마나 주목하는지 (설명용으로 정한 예시값)</div>
   </div>
   <div class="row" style="gap:22px;align-items:flex-end">
     <div class="stack" style="gap:8px;text-align:right"><div class="mono" style="font-size:24px;line-height:1.3">10단어 × 10단어<br>= 연결 <b>100</b>개</div><div class="muted" style="font-size:20px;line-height:1.4">트랜스포머(2017)는 이런 표를<br>한 층에 8개씩, 6층으로 계산</div></div>
@@ -937,10 +960,11 @@ ${recapNodes}
         let needLayout = true;
         const requestLayout = () => { needLayout = true; };
         wordsEl.addEventListener('mouseover', (e) => { const s = e.target.closest('.at-w'); if (s) setFocus(+s.dataset.i); });
+        wordsEl.addEventListener('pointerdown', (e) => { if (e.pointerType === 'mouse') return; const s = e.target.closest('.at-w'); if (s) setFocus(+s.dataset.i); });
         wordsEl.addEventListener('click', (e) => { const s = e.target.closest('.at-w'); if (s && +s.dataset.i === 8) setVar(v === 'tired' ? 'wide' : 'tired'); });
         el.querySelector('.at-wrap').addEventListener('mouseleave', () => setFocus(6));
         el.querySelectorAll('.at-v').forEach((b) => b.addEventListener('click', () => setVar(b.dataset.v)));
-        mat.addEventListener('mousemove', (e) => { const p = K.pt(e, mat); setFocus(K.clamp(Math.floor((p.y - 3) / CS), 0, 9)); });
+        mat.addEventListener('pointermove', (e) => { const p = K.pt(e, mat); setFocus(K.clamp(Math.floor((p.y - 3) / CS), 0, 9)); });
         mat.addEventListener('mouseleave', () => setFocus(6));
         K.loop(el, (t, dt) => {
           if (needLayout) { needLayout = false; measure(); drawArcs(); }
@@ -1102,7 +1126,7 @@ ${recapNodes}
     <div class="box hl-a" aria-live="polite"></div>
     <div class="row center" style="justify-content:space-between"><span class="mono" style="font-size:20px;color:var(--ink-2)">이 자리에 올 단어 후보 (예시 확률)</span><button class="btn sm hl-replay">다시 재생</button></div>
     <div class="hl-bars"></div>
-    <div class="hand" style="font-size:42px;margin-top:4px">‘사실인가?’가 아니라 ‘다음에 올 법한가?’로 고른다</div>
+    <div class="hand hl-hand" style="font-size:42px;margin-top:4px;white-space:nowrap">‘사실인가?’가 아니라 ‘다음에 올 법한가?’로 고른다</div>
   </div>
   <div class="stack" style="gap:16px;min-width:0">
     <div class="subtitle">확인 습관 4가지</div>
@@ -1117,6 +1141,7 @@ ${recapNodes}
 <div class="src">출처: OpenAI ‘Introducing ChatGPT’(2022-11-30) 한계 항목 · Bard 오답과 시총 하락: The Standard·Fortune 2023-02-08 · 질문·답·확률은 설명용 가짜 예시</div>`,
       init(el, K, f) {
         const aEl = el.querySelector('.hl-a'), bars = el.querySelector('.hl-bars');
+        fitLine(el.querySelector('.hl-hand'));
         aEl.innerHTML = '<span class="who">AI 답 ›</span>' + HS.map((s) => `<span class="wd${s.fake ? ' fake' : ''}">${esc(s.w)}</span>`).join('') + '<span class="caret"></span><span class="hl-leg">물결 밑줄 = 근거 없이 지어낸 부분</span>';
         const wEls = Array.from(aEl.querySelectorAll('.wd'));
         bars.innerHTML = [0, 1, 2].map(() => '<div class="hl-row"><span class="w"></span><span class="tr"><i class="fl"></i></span><span class="p"></span></div>').join('');
