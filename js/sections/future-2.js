@@ -14,6 +14,10 @@
     return Kit.sketchPath(pts);
   }
 
+  /* set an attribute only when its value changes: Chrome re-lays out and repaints an SVG element even when a
+     geometry attribute is rewritten with the value it already has */
+  const setA = (n, k, v) => { v = String(v); if (n.getAttribute(k) !== v) n.setAttribute(k, v); };
+
   /* ───────────────────────── 1. METR: 느낌 vs 측정 ───────────────────────── */
   const MP_S = 6, MP_X0 = 566, MP_LX = 262;
   const MP_ROWS = [
@@ -192,14 +196,15 @@
 
         const inp = el.querySelector('.mp-pred'), out = el.querySelector('.mp-out');
         // dotted line from y 92 to 304, broken where it would run through a visible value label
-        const drawLine = () => {
+        // (boxes: value-label boxes already read this frame, see draw())
+        const drawLine = (boxes) => {
           const x = X(+inp.value);
-          const gaps = rows.filter((r) => r.y < 304 && +r.val.style.opacity > 0.05).map((r) => r.val.getBBox())
+          const gaps = rows.filter((r) => r.y < 304 && +r.val.style.opacity > 0.05).map((r) => (boxes && boxes.get(r)) || r.val.getBBox())
             .filter((b) => x > b.x - 6 && x < b.x + b.width + 6).map((b) => [b.y + 4, b.y + b.height - 4]);
           let d = '', y0 = 92;
           gaps.forEach(([a, b]) => { if (a > y0) d += `M${x},${y0}V${a}`; y0 = Math.max(y0, b); });
           if (y0 < 304) d += `M${x},${y0}V304`;
-          pl.setAttribute('d', d || `M${x},304V304`);
+          setA(pl, 'd', d || `M${x},304V304`);
         };
         const setPred = () => {
           const v = +inp.value;
@@ -216,16 +221,22 @@
         setPred();
 
         let anim = 99;
+        const valOp = (r) => K.clamp((anim - r.start - r.dur * 0.6) / 0.3, 0, 1);
         const draw = () => {
+          // Read the boxes of the labels that may show before this frame's writes. Read after them (the line
+          // needs them), each one forced an extra style + layout pass on every animation frame.
+          const boxes = new Map();
+          rows.forEach((r) => { if (r.y < 304 && valOp(r) > 0.04) boxes.set(r, r.val.getBBox()); });
           rows.forEach((r) => {
             const p = K.easeOut(K.clamp((anim - r.start) / r.dur, 0, 1));
             const w = Math.abs(r.v) * MP_S * p;
-            r.bar.setAttribute('x', r.v >= 0 ? MP_X0 : MP_X0 - w);
-            r.bar.setAttribute('width', Math.max(0.01, w));
-            r.val.style.opacity = K.clamp((anim - r.start - r.dur * 0.6) / 0.3, 0, 1);
+            // finished or not-yet-started bars keep their values: skip those writes, each would repaint the bar
+            setA(r.bar, 'x', r.v >= 0 ? MP_X0 : MP_X0 - w);
+            setA(r.bar, 'width', Math.max(0.01, w));
+            r.val.style.opacity = valOp(r);
             if (r.wh) r.wh.style.opacity = K.clamp((anim - r.start - r.dur) / 0.35, 0, 1);
           });
-          drawLine();
+          drawLine(boxes);
         };
         K.loop(el, (t, dt) => { if (anim < 3) { anim += dt; draw(); } });
         f._mpPlay = () => { anim = 0; draw(); };
@@ -513,13 +524,18 @@
         const target = () => W_2023 + ((+yr.value - 2023) / 7) * W_DROP;
         st.w = st.tw = target();
 
+        let lastW = null;
         function drawWater() {
           const W = st.w;
-          water.setAttribute('y', W);
-          water.setAttribute('height', Math.max(0, 900 - W)); // stop at the frame's bottom edge (svg is overflow:visible)
           let d = '';
           for (let x = 0; x <= 1600; x += 20) d += (x ? 'L' : 'M') + x + ',' + (W + Math.sin(x / 34 + st.phase) * 4 + Math.sin(x / 13 - st.phase * 1.7) * 1.2).toFixed(1);
           wave.setAttribute('d', d);
+          // the wave moves every frame; the rest only when the waterline does. Rewriting an unchanged
+          // y/height still repaints the whole 1600px-wide water rect and the side labels on every frame.
+          if (W === lastW) return;
+          lastW = W;
+          water.setAttribute('y', W);
+          water.setAttribute('height', Math.max(0, 900 - W)); // stop at the frame's bottom edge (svg is overflow:visible)
           sideUp.setAttribute('y', W - 22);
           sideDn.setAttribute('y', W + 46);
           hand.setAttribute('transform', `translate(96,${(W + 104).toFixed(1)}) rotate(-4)`);

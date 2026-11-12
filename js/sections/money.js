@@ -20,11 +20,12 @@
      camera was far away (the overview at load, e.g. with fallback fonts on an offline PC) can paint
      tiny and bunched in a corner after the camera zooms in. Re-lay out the frame's SVG text on arrival. */
   function relayoutSvgText(el) {
-    el.querySelectorAll('.stage svg').forEach((s) => {
-      if (!s.querySelector('text')) return;
-      const d = s.style.display;
-      s.style.display = 'none'; void s.getBoundingClientRect(); s.style.display = d;
-    });
+    // hide them all, force one layout, then show them again: one forced layout per frame, not one per SVG
+    const list = Array.from(el.querySelectorAll('.stage svg')).filter((s) => s.querySelector('text')).map((s) => [s, s.style.display]);
+    if (!list.length) return;
+    list.forEach(([s]) => { s.style.display = 'none'; });
+    void list[0][0].getBoundingClientRect();
+    list.forEach(([s, d]) => { s.style.display = d; });
   }
 
   /* An offline Windows PC has no Nanum Pen Script / IBM Plex: the hand font falls back to Comic Sans +
@@ -463,25 +464,35 @@
         const cpu = K.canvas(hosts[0], 336, 336), gpu = K.canvas(hosts[1], 336, 336);
         const sCpu = el.querySelector('.s-cpu'), sGpu = el.querySelector('.s-gpu'), btn = el.querySelector('.r-go');
         let T = RACE.gpuDone, running = false;
+        // a text write repaints even when the string is the same; these change only ~10 times a second
+        const setText = (n, s) => { if (n.textContent !== s) n.textContent = s; };
         const status = () => {
           const tc = Math.min(T, RACE.cpuDone), tg = Math.min(T, RACE.gpuDone);
           const pc = Math.round((Math.min(RACE.perW, Math.floor(tc / RACE.CPU_CELL)) / RACE.perW) * 100);
           let gDone = 0; for (let i = 0; i < RACE.CELLS; i++) if (tg >= RACE.dur[i]) gDone++;
           const pg = Math.round((gDone / RACE.CELLS) * 100);
-          sCpu.textContent = `${tc.toFixed(1)}초 · ${pc === 100 ? '끝!' : pc + '%'}`;
-          sGpu.textContent = `${tg.toFixed(1)}초 · ${pg === 100 ? '끝!' : pg + '%'}`;
+          setText(sCpu, `${tc.toFixed(1)}초 · ${pc === 100 ? '끝!' : pc + '%'}`);
+          setText(sGpu, `${tg.toFixed(1)}초 · ${pg === 100 ? '끝!' : pg + '%'}`);
           sCpu.classList.toggle('done', pc === 100); sGpu.classList.toggle('done', pg === 100);
         };
-        const draw = () => { drawLane(cpu, 'cpu', T); drawLane(gpu, 'gpu', T); status(); };
-        btn.addEventListener('click', () => { T = 0; running = true; btn.textContent = '다시 경주'; draw(); });
+        // During the race, redraw a lane only when its picture can change: the CPU lane shows just the number
+        // of finished cells per worker (a new one every 28 ms), and the GPU lane is all solid from gpuDone on.
+        let cpuShown = -1, gpuShownT = -1;
+        const draw = (force) => {
+          const done = Math.min(RACE.perW, Math.floor(T / RACE.CPU_CELL));
+          if (force || done !== cpuShown) { drawLane(cpu, 'cpu', T); cpuShown = done; }
+          if (force || gpuShownT < RACE.gpuDone || T < RACE.gpuDone) { drawLane(gpu, 'gpu', T); gpuShownT = T; }
+          status();
+        };
+        btn.addEventListener('click', () => { T = 0; running = true; btn.textContent = '다시 경주'; draw(true); });
         K.loop(el, (t, dt) => {
           if (!running) return;
           T += dt;
           if (T >= RACE.cpuDone) { T = RACE.cpuDone; running = false; }
           draw();
         });
-        K.onTheme(draw);
-        draw();
+        K.onTheme(() => draw(true));
+        draw(true);
         fitFrame(el); onFonts(() => fitFrame(el));
       },
       enter(el) { relayoutSvgText(el); fitFrame(el); },
@@ -561,14 +572,16 @@
             <text class="nm" text-anchor="middle" y="${n.hub ? 2 : -1}">${n.nm}</text><text class="sb" text-anchor="middle" y="${n.hub ? 28 : 24}">${n.sb}</text></g>`;
         });
         svg.innerHTML = s;
-        const coins = Array.from(svg.querySelectorAll('.coin[data-c]'));
+        // per-frame loop: read each coin's edge and offset once, not from dataset strings 60 times a second
+        const coins = Array.from(svg.querySelectorAll('.coin[data-c]')).map((n) => ({ n, e: EDGES[+n.dataset.c], k: +n.dataset.k, x: '', y: '' }));
         let phase = 0;
         const place = () => {
           coins.forEach((c) => {
-            const e = EDGES[+c.dataset.c];
-            const u = (+c.dataset.k + (phase * 80) / e.len) % 1;
-            const p = edgeAt(e, u);
-            c.setAttribute('cx', p.x.toFixed(1)); c.setAttribute('cy', p.y.toFixed(1));
+            const e = c.e;
+            const u = (c.k + (phase * 80) / e.len) % 1;
+            const p = edgeAt(e, u), x = p.x.toFixed(1), y = p.y.toFixed(1);
+            if (x !== c.x) c.n.setAttribute('cx', (c.x = x));
+            if (y !== c.y) c.n.setAttribute('cy', (c.y = y));
           });
         };
         const info = {
@@ -744,8 +757,8 @@
         let sel = 0, grow = 1;
         const draw = () => {
           bars.forEach((b, i) => {
-            const on = i === sel, full = sx(POWER[i].v) - L;
-            b.setAttribute('width', (on ? full * K.easeOut(grow) : full).toFixed(1));
+            const on = i === sel, full = sx(POWER[i].v) - L, wd = (on ? full * K.easeOut(grow) : full).toFixed(1);
+            if (b.getAttribute('width') !== wd) b.setAttribute('width', wd); // an unchanged rewrite still repaints the bar
             b.style.fill = on ? 'var(--hl)' : 'var(--paper-3)';
             b.style.stroke = on ? 'var(--ink)' : 'var(--ink-3)';
           });
@@ -912,12 +925,14 @@
         let ang = 0, target = 0;
         const W = 430;
         const layout = () => {
+          // read the pan heights before this call's writes (transforms do not change them), so the read
+          // does not force a style recalc on every frame of the swing
+          const hL = pl.offsetHeight || 300, hR = pr.offsetHeight || 300;
           const a = (ang * PI) / 180, ex = Math.cos(a) * HALF, ey = Math.sin(a) * HALF;
           beam.setAttribute('transform', `rotate(${ang.toFixed(2)} ${PX} ${PY})`);
           const lx = PX - ex, ly = PY - ey, rx = PX + ex, ry = PY + ey;
           pl.style.transform = `translate(${(lx - W / 2).toFixed(1)}px,${(ly + DROP).toFixed(1)}px)`;
           pr.style.transform = `translate(${(rx - W / 2).toFixed(1)}px,${(ry + DROP).toFixed(1)}px)`;
-          const hL = pl.offsetHeight || 300, hR = pr.offsetHeight || 300;
           sL.innerHTML = `<path d="M${lx},${ly} L${lx - W / 2 + 16},${ly + DROP + 18} M${lx},${ly} L${lx + W / 2 - 16},${ly + DROP + 18}"/><path d="M${lx - W / 2 - 8},${ly + DROP + hL + 6} Q${lx},${ly + DROP + hL + 30} ${lx + W / 2 + 8},${ly + DROP + hL + 6}" style="stroke:var(--ink);stroke-width:4"/>`;
           sR.innerHTML = `<path d="M${rx},${ry} L${rx - W / 2 + 16},${ry + DROP + 18} M${rx},${ry} L${rx + W / 2 - 16},${ry + DROP + 18}"/><path d="M${rx - W / 2 - 8},${ry + DROP + hR + 6} Q${rx},${ry + DROP + hR + 30} ${rx + W / 2 + 8},${ry + DROP + hR + 6}" style="stroke:var(--ink);stroke-width:4"/>`;
         };

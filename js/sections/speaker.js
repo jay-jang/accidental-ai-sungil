@@ -33,15 +33,60 @@
     const h2 = [x2 - head * Math.cos(a + 0.5), y2 - head * Math.sin(a + 0.5)];
     return `M${f1(x1)},${f1(y1)} Q${f1(mx)},${f1(my)} ${f1(x2)},${f1(y2)} M${f1(h1[0])},${f1(h1[1])} L${f1(x2)},${f1(y2)} L${f1(h2[0])},${f1(h2[1])}`;
   }
-  /** length along an SVG path closest to (x, y) */
-  function lenAt(path, x, y) {
-    const L = path.getTotalLength();
+  /** length (a multiple of 2, at most L) along a path closest to (x, y); at(len) → {x, y} is the point at that length.
+      at() is computed in JS (polyAt/cubicAt below): getPointAtLength costs up to ~0.1 ms per call and forces
+      style/layout, and this search samples the path hundreds of times per point (≈0.75 s for accidental-path). */
+  function lenAt(at, L, x, y) {
     let best = 0, bd = Infinity;
     for (let s = 0; s <= L; s += 2) {
-      const p = path.getPointAtLength(s), d = (p.x - x) ** 2 + (p.y - y) ** 2;
+      const p = at(s), d = (p.x - x) ** 2 + (p.y - y) ** 2;
       if (d < bd) { bd = d; best = s; }
     }
     return best;
+  }
+  /** getPointAtLength for a straight-segment polyline [[x, y], ...]; .total = its length */
+  function polyAt(P) {
+    const cum = [0];
+    for (let i = 1; i < P.length; i++) cum.push(cum[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
+    const at = (s) => {
+      let i = 1;
+      while (i < P.length - 1 && cum[i] < s) i++;
+      const f = Kit.clamp((s - cum[i - 1]) / (cum[i] - cum[i - 1]), 0, 1);
+      return { x: Kit.lerp(P[i - 1][0], P[i][0], f), y: Kit.lerp(P[i - 1][1], P[i][1], f) };
+    };
+    at.total = cum[cum.length - 1];
+    return at;
+  }
+  /** getPointAtLength for a path "d" of cubic segments only (Kit.sketchPath output): an arc-length table of
+      `n` chords per segment, then the exact Bézier point. With n = 1024 it agrees with Chrome's own result to
+      Chrome's float precision (a 0.1 rounding step in ~1% of points). */
+  function cubicAt(d, n) {
+    const v = d.match(/-?\d+(?:\.\d+)?/g).map(Number), S = [];
+    for (let i = 2; i + 5 < v.length; i += 6) S.push(v.slice(i - 2, i + 6)); // [x0, y0, c1x, c1y, c2x, c2y, x1, y1]
+    const ev = (s, t) => {
+      const u = 1 - t, a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, e = t * t * t;
+      return { x: a * s[0] + b * s[2] + c * s[4] + e * s[6], y: a * s[1] + b * s[3] + c * s[5] + e * s[7] };
+    };
+    const last = S.length * n, len = new Float64Array(last + 1); // len[k * n + j] = length at t = j / n of segment k
+    let acc = 0;
+    S.forEach((s, k) => {
+      let px = s[0], py = s[1];
+      for (let j = 1; j <= n; j++) {
+        const t = j / n, u = 1 - t, a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, e = t * t * t;
+        const x = a * s[0] + b * s[2] + c * s[4] + e * s[6], y = a * s[1] + b * s[3] + c * s[5] + e * s[7];
+        acc += Math.sqrt((x - px) * (x - px) + (y - py) * (y - py)); len[k * n + j] = acc; px = x; py = y;
+      }
+    });
+    const at = (x) => {
+      if (!(x > 0)) return ev(S[0], 0);
+      if (x >= len[last]) return ev(S[S.length - 1], 1);
+      let lo = 1, hi = last;
+      while (lo < hi) { const m = (lo + hi) >> 1; if (len[m] < x) lo = m + 1; else hi = m; }
+      const k = Math.floor((lo - 1) / n), j = lo - k * n;
+      return ev(S[k], (j - 1 + (x - len[lo - 1]) / (len[lo] - len[lo - 1])) / n);
+    };
+    at.segs = S; at.ends = S.map((s, k) => len[(k + 1) * n]); // the segments and the length at each one's end
+    return at;
   }
   const esc = (s) => Kit.escape(s);
   const isCurrent = (el) => el.classList.contains('current');
@@ -203,12 +248,13 @@
         </g>`;
       });
       svg.innerHTML = s;
-      const mainP = svg.querySelector('.cl-main'), mentP = svg.querySelector('.cl-ment'), mk = svg.querySelector('.marker');
-      const paths = { main: mainP, ment: mentP };
-      const J_MAIN = lenAt(mainP, 610, 270);
+      const mk = svg.querySelector('.marker');
+      // both lines are the MAIN / MENT polylines drawn above, measured in JS instead of asking the DOM
+      const paths = { main: polyAt(MAIN), ment: polyAt(MENT) };
+      const J_MAIN = lenAt(paths.main, paths.main.total, 610, 270);
       ST.forEach((t) => {
-        t.lenMain = t.line === 'ment' ? null : lenAt(mainP, t.x, t.y);
-        t.lenMent = t.line === 'main' ? null : lenAt(mentP, t.x, t.y);
+        t.lenMain = t.line === 'ment' ? null : lenAt(paths.main, paths.main.total, t.x, t.y);
+        t.lenMent = t.line === 'main' ? null : lenAt(paths.ment, paths.ment.total, t.x, t.y);
       });
       const card = el.querySelector('.cl-card');
       const C = {
@@ -217,7 +263,7 @@
       };
       const st = { path: 'main', len: 0, target: 0, cur: 0, lastTick: 0 };
       const place = () => {
-        const p = paths[st.path].getPointAtLength(st.len);
+        const p = paths[st.path](st.len);
         mk.setAttribute('cx', f1(p.x)); mk.setAttribute('cy', f1(p.y));
       };
       const fill = (t) => {
@@ -575,25 +621,30 @@
       const hh = (h) => `${String(Math.floor(h)).padStart(2, '0')}:${String(Math.floor((h % 1) * 6) * 10).padStart(2, '0')}`;
       // the tag turns yellow; its price switches to the dark "on yellow" ink so it stays readable in the dark theme too
       const flash = (k) => { const ns = [q('.fl' + k), q('.pr' + k)]; ns.forEach((n) => n.classList.add('hot')); setTimeout(() => ns.forEach((n) => n.classList.remove('hot')), 380); };
+      // render() runs every frame, but the texts change a few times a second at most (the clock ~12×/s):
+      // setting textContent re-lays the SVG <text> out even when the string is the same, so write only changes
+      const clock = q('.clock'), pr1 = q('.pr1'), pr2 = q('.pr2'), ct1 = q('.ct1'), ct2 = q('.ct2');
+      const text = (n, s) => { if (n.textContent !== s) n.textContent = s; };
+      const opa = (n, v) => { if (n.style.opacity !== String(v)) n.style.opacity = v; };
       const render = (animate) => {
         const h = S2.h;
-        q('.clock').textContent = `가상의 하루 · ${hh(h)}`;
-        q('.pr1').textContent = S2.p1 + '만';
-        q('.pr2').textContent = S2.p2 + '만';
-        q('.ct1').textContent = `오늘 수정 ${S2.n1}번`;
-        q('.ct2').textContent = `오늘 수정 ${S2.n2}번`;
+        text(clock, `가상의 하루 · ${hh(h)}`);
+        text(pr1, S2.p1 + '만');
+        text(pr2, S2.p2 + '만');
+        text(ct1, `오늘 수정 ${S2.n1}번`);
+        text(ct2, `오늘 수정 ${S2.n2}번`);
         // lane 1: one worker token crosses the boxes between 06:00 and 09:00
         if (h >= 6 && h < 9) { // only visible on the arrows, hidden while "inside" a box
           const x = Kit.lerp(290, 1104, (h - 6) / 3);
           tk1.setAttribute('cx', f1(x)); tk1.setAttribute('cy', 100);
-          tk1.style.opacity = B1.some((b) => x > b.x + 4 && x < b.x + b.w - 4) ? 0 : 1;
-        } else tk1.style.opacity = 0;
+          opa(tk1, B1.some((b) => x > b.x + 4 && x < b.x + b.w - 4) ? 0 : 1);
+        } else opa(tk1, 0);
         // lane 2: a steady stream
         const tt = animate ? performance.now() / 1000 : 0.37;
         toks.forEach((t) => {
           const u = (tt * 0.8 + t.ph) % 1, p = route2(t.k, u), x = p[0];
           t.el.setAttribute('cx', f1(x)); t.el.setAttribute('cy', f1(p[1]));
-          t.el.style.opacity = (x > 566 && x < 754) || (x > 826 && x < 1034) ? 0 : 1;
+          opa(t.el, (x > 566 && x < 754) || (x > 826 && x < 1034) ? 0 : 1);
         });
       };
       K.loop(el, (t, dt) => {
@@ -734,19 +785,44 @@
       const real = svg.querySelector('.real'), headDot = svg.querySelector('.head');
       const L = real.getTotalLength();
       real.style.strokeDasharray = `${f1(L)} ${f1(L + 20)}`;
-      const kl = KN.map((k) => lenAt(real, k.p[0], k.p[1]));
+      const realAt = cubicAt(real.getAttribute('d'), 1024); // also used every frame by draw(): no layout reads there
+      const kl = KN.map((k) => lenAt(realAt, L, k.p[0], k.p[1]));
       const kEls = Array.from(svg.querySelectorAll('.k'));
       const extra = [svg.querySelector('.next'), svg.querySelector('.qm'), el.querySelector('.ap-q')];
       const range = el.querySelector('.ap-range');
-      const st = { p: 1, playing: false };
+      /* While the replay plays, the curve is drawn as its 9 knot-to-knot pieces instead of one dashed path: then only
+         the piece being drawn changes each frame and only its box is repainted, not the whole curve's (most of the
+         replay's raster work). Pieces join at the knots, under the opaque knot circles, and the growing end sits under
+         the head dot, so it looks the same. At rest and while the slider is dragged the single path is shown. */
+      const pcs = Kit.svg('g', { 'aria-hidden': 'true' });
+      pcs.style.display = 'none';
+      real.parentNode.insertBefore(pcs, real.nextSibling);
+      const pieces = realAt.segs.map((g, k) => {
+        const a = k ? realAt.ends[k - 1] : 0, dl = +f1(realAt.ends[k] - a + 1); // dash longer than the piece
+        const p = Kit.svg('path', { class: 'real', d: `M${g[0]},${g[1]} C${g[2]},${g[3]} ${g[4]},${g[5]} ${g[6]},${g[7]}` }, pcs);
+        p.style.strokeDasharray = `${dl} ${f1(dl + 20)}`;
+        p.style.visibility = 'hidden';
+        return { p, a, b: realAt.ends[k], dl, v: 'hidden' };
+      });
+      const st = { p: 1, playing: false, pieces: false };
       const draw = (pr) => {
         st.p = pr;
         const len = L * pr;
-        real.style.strokeDashoffset = f1(L - len);
+        const usePieces = st.playing && pr < 1;
+        if (usePieces !== st.pieces) { st.pieces = usePieces; pcs.style.display = usePieces ? '' : 'none'; real.style.visibility = usePieces ? 'hidden' : ''; }
+        if (usePieces) {
+          pieces.forEach((q) => {
+            const v = len <= q.a ? 'hidden' : f1(len >= q.b ? 0 : q.dl - (len - q.a));
+            if (v === q.v) return;
+            if (v === 'hidden' || q.v === 'hidden') q.p.style.visibility = v === 'hidden' ? 'hidden' : '';
+            if (v !== 'hidden') q.p.style.strokeDashoffset = v;
+            q.v = v;
+          });
+        } else real.style.strokeDashoffset = f1(L - len);
         kEls.forEach((g) => g.classList.toggle('hide', kl[+g.dataset.i] > len + 3));
         const done = pr >= 0.995;
         extra.forEach((n) => { n.style.opacity = done ? 1 : 0; });
-        if (!done && pr > 0.002) { const q = real.getPointAtLength(len); headDot.setAttribute('cx', f1(q.x)); headDot.setAttribute('cy', f1(q.y)); headDot.style.opacity = 1; }
+        if (!done && pr > 0.002) { const q = realAt(len); headDot.setAttribute('cx', f1(q.x)); headDot.setAttribute('cy', f1(q.y)); headDot.style.opacity = 1; }
         else headDot.style.opacity = 0;
         range.value = Math.round(pr * 1000);
       };
@@ -762,20 +838,34 @@
       const STAMP = ['', '우연히 맡은 일', '실패', '새 기회'];
       let marks = K.store.get('speaker-turns', {});
       if (!marks || typeof marks !== 'object') marks = {};
-      const paint = (g) => {
+      /* a stamp is built in two halves so paintAll() can build every stamp, then measure them all (one layout),
+         then size them all, instead of a forced layout per stamp on every arrival */
+      const build = (g) => {
         const i = +g.dataset.i, v = marks[i] || 0, sp = KN[i].sp;
         const old = g.querySelector('.stp'); if (old) old.remove();
-        if (!v || !sp) return;
+        if (!v || !sp) return null;
         const sg = Kit.svg('g', { class: 'stp s' + v, transform: `rotate(-5 ${sp[0]} ${sp[1]})` }, g);
         const r = Kit.svg('rect', { rx: 3 }, sg);
         const t = Kit.svg('text', { x: sp[0], y: sp[1], 'text-anchor': sp[2] }, sg);
         t.textContent = STAMP[v];
-        let b; try { b = t.getBBox(); } catch (e) { b = null; }
-        if (!b || !b.width) b = { x: sp[0] - (sp[2] === 'end' ? 130 : sp[2] === 'middle' ? 65 : 0), y: sp[1] - 20, width: 130, height: 26 };
-        r.setAttribute('x', f1(b.x - 9)); r.setAttribute('y', f1(b.y - 3));
-        r.setAttribute('width', f1(b.width + 18)); r.setAttribute('height', f1(b.height + 6));
+        return { r, t, sp };
       };
-      const paintAll = () => kEls.forEach((g) => { if (!g.classList.contains('end')) paint(g); });
+      const measure = (s) => {
+        const sp = s.sp;
+        let b; try { b = s.t.getBBox(); } catch (e) { b = null; }
+        if (!b || !b.width) b = { x: sp[0] - (sp[2] === 'end' ? 130 : sp[2] === 'middle' ? 65 : 0), y: sp[1] - 20, width: 130, height: 26 };
+        return b;
+      };
+      const size = (s, b) => {
+        s.r.setAttribute('x', f1(b.x - 9)); s.r.setAttribute('y', f1(b.y - 3));
+        s.r.setAttribute('width', f1(b.width + 18)); s.r.setAttribute('height', f1(b.height + 6));
+      };
+      const paint = (g) => { const s = build(g); if (s) size(s, measure(s)); };
+      const paintAll = () => {
+        const ss = kEls.filter((g) => !g.classList.contains('end')).map(build).filter(Boolean);
+        const bs = ss.map(measure);
+        ss.forEach((s, k) => size(s, bs[k]));
+      };
       svg.addEventListener('click', (e) => {
         const g = e.target.closest('.k');
         if (!g || g.classList.contains('end')) return;
@@ -906,7 +996,9 @@
       K.loop(el, (t) => {
         const r = 16 + 7 * ((t * 0.9) % 1);
         ring.setAttribute('r', f1(r));
-        ring.style.opacity = f1(1 - ((t * 0.9) % 1));
+        // stroke-opacity rather than style.opacity: the ring is a lone stroke (fill:none), so it looks the same,
+        // but a changing element opacity makes Chrome re-layerize the page on every frame
+        ring.setAttribute('stroke-opacity', f1(1 - ((t * 0.9) % 1)));
       });
       sel(cur);
       ring.setAttribute('r', 18);

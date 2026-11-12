@@ -46,6 +46,69 @@
     x = Math.min(0, Math.max(iw - dw, x)); y = Math.min(0, Math.max(ih - dh, y));
     return `<figure class="photo ${cls || ''}" style="--w:${w}px;${extra || ''}"><span class="pl1-zf" style="height:${ih.toFixed(1)}px"><img src="${Kit.img(id)}" alt="${Kit.escape(caption.replace(/<[^>]+>/g, ''))}" draggable="false" style="width:${dw.toFixed(1)}px;height:${dh.toFixed(1)}px;left:${x.toFixed(1)}px;top:${y.toFixed(1)}px"></span><figcaption>${caption}</figcaption></figure>`;
   }
+  /**
+   * JS twin of SVGPathElement.getTotalLength()/getPointAtLength() for our own absolute M/L/C paths.
+   * It repeats Blink's PathTraversalState step for step (cubics halved until the control polygon is
+   * within a relative 1e-8 of the chord, float32 math), so it returns the same points, but it walks
+   * the path once instead of twice per query and never forces a style/layout update.
+   */
+  function pathWalker(d) {
+    const F = Math.fround;
+    const dist = (ax, ay, bx, by) => F(Math.hypot(F(bx - ax), F(by - ay)));
+    const mid = (p, q) => F(p + q) / 2;
+    const sx = [], sy = [], ex = [], ey = [], cum = [], segEnd = [];   // flattened pieces, running length
+    const piece = (a, b, c, e, t) => { sx.push(a); sy.push(b); ex.push(c); ey.push(e); cum.push(t); segEnd.push(0); };
+    let T = 0, cx = 0, cy = 0, x0 = 0, y0 = 0;
+    const tok = d.match(/[MLC]|-?[\d.]+(?:e[-+]?\d+)?/g);
+    for (let i = 0; i < tok.length;) {
+      const cmd = tok[i++], num = () => F(+tok[i++]);
+      if (cmd === 'M') { cx = x0 = num(); cy = y0 = num(); continue; }
+      if (cmd === 'L') {
+        const x = num(), y = num();
+        T = F(T + dist(cx, cy, x, y)); piece(cx, cy, x, y, T); segEnd[segEnd.length - 1] = 1;
+        cx = x; cy = y; continue;
+      }
+      let q = [cx, cy, num(), num(), num(), num(), num(), num(), 0], acc = 0;
+      const ox = q[6], oy = q[7];
+      const sc = (q[0] * q[0] + q[1] * q[1] + (q[2] * q[2] + q[3] * q[3]) + (q[4] * q[4] + q[5] * q[5]) + (q[6] * q[6] + q[7] * q[7])) / 16;
+      if (sc >= 1e-16) {
+        const stack = [q];
+        do {
+          const [a, b, c1, c2, d1, d2, e1, e2, dep] = q;
+          const l = F(F(dist(a, b, c1, c2) + dist(c1, c2, d1, d2)) + dist(d1, d2, e1, e2));
+          const disc = F(l - dist(a, b, e1, e2));
+          if ((disc * disc) / sc > 1e-16 && dep < 20) {
+            const mx = mid(c1, d1), my = mid(c2, d2);
+            const l1x = mid(a, c1), l1y = mid(b, c2), l2x = mid(l1x, mx), l2y = mid(l1y, my);
+            const r2x = mid(d1, e1), r2y = mid(d2, e2), r1x = mid(r2x, mx), r1y = mid(r2y, my);
+            const kx = mid(l2x, r1x), ky = mid(l2y, r1y);
+            stack.push([kx, ky, r1x, r1y, r2x, r2y, e1, e2, dep + 1]);
+            q = [a, b, l1x, l1y, l2x, l2y, kx, ky, dep + 1];
+          } else {
+            acc = F(acc + l); piece(a, b, e1, e2, F(T + acc));
+            q = stack.pop();
+          }
+        } while (stack.length);
+        segEnd[segEnd.length - 1] = 1;
+      }
+      T = F(T + acc); cx = ox; cy = oy;
+    }
+    const total = T, n = cum.length;
+    return {
+      total,
+      at(s) {
+        let D = F(s);
+        if (!(D > 0)) return { x: x0, y: y0 };
+        if (D > total) D = total;
+        let lo = 0, hi = n - 1;
+        while (lo < hi) { const m = (lo + hi) >> 1; if (cum[m] >= D) hi = m; else lo = m + 1; }
+        while (cum[lo] === D && !segEnd[lo]) lo++;   // Blink needs '>' inside a segment, '>=' at its end
+        const off = F(D - cum[lo]), a = F(Math.atan2(F(ey[lo] - sy[lo]), F(ex[lo] - sx[lo])));
+        return { x: F(ex[lo] + F(off * F(Math.cos(a)))), y: F(ey[lo] + F(off * F(Math.sin(a)))) };
+      },
+    };
+  }
+
   const SHARED_CSS = `<style>
     .pl1-zf { display: block; position: relative; overflow: hidden; background: #c9ccc4; }
     .pl1-zf img { position: absolute; max-width: none; aspect-ratio: auto !important; object-fit: fill !important; }
@@ -542,16 +605,17 @@
         const rail2 = svg.querySelector('.rail2');
         rail2.setAttribute('d', d);
         rail2.setAttribute('transform', 'translate(0,11)');
-        const path = svg.querySelector('.rail');
-        const total = path.getTotalLength();
+        // ~1,100 DOM path queries here used to take ~70 ms; pathWalker gives the same points in ~2 ms
+        const path = pathWalker(d);
+        const total = path.total;
         // lookup: x → length (path is monotonic in x)
         const table = [];
-        for (let s = 0; s <= total; s += 2) { const p = path.getPointAtLength(s); table.push([p.x, p.y, s]); }
+        for (let s = 0; s <= total; s += 2) { const p = path.at(s); table.push([p.x, p.y, s]); }
         const atX = (x) => { let best = table[0]; for (const r of table) if (Math.abs(r[0] - x) < Math.abs(best[0] - x)) best = r; return best; };
         // ties & posts
         const gT = svg.querySelector('.g-ties'), gP = svg.querySelector('.g-posts');
         for (let s = 6; s < total; s += 20) {
-          const p = path.getPointAtLength(s);
+          const p = path.at(s);
           K.svg('line', { class: 'tie', x1: p.x, y1: p.y, x2: p.x, y2: p.y + 11 }, gT);
         }
         for (let x = 64; x < 1560; x += 46) {
@@ -604,7 +668,7 @@
         // where the cart parks for each event: just before (or after) the dot, on whichever side keeps
         // the cart off the neighbouring labels (box = the rotated cart body + wheels, as placeCart draws it)
         const cartBox = (s) => {
-          const p = path.getPointAtLength(s), q = path.getPointAtLength(Math.min(total, s + 3));
+          const p = path.at(s), q = path.at(Math.min(total, s + 3));
           const a = Math.atan2(q.y - p.y, q.x - p.x), c = Math.cos(a), sn = Math.sin(a);
           const xs = [], ys = [];
           [[-24, -24], [24, -24], [24, 3], [-24, 3]].forEach(([u, v]) => { xs.push(p.x + u * c - v * sn); ys.push(p.y + u * sn + v * c); });
@@ -651,8 +715,8 @@
         const cart = svg.querySelector('.cart');
         let cur = 5, pos = lens[cur], target = pos;
         function placeCart(s) {
-          const p = path.getPointAtLength(Math.max(0, Math.min(total, s)));
-          const q = path.getPointAtLength(Math.max(0, Math.min(total, s + 3)));
+          const p = path.at(Math.max(0, Math.min(total, s)));
+          const q = path.at(Math.max(0, Math.min(total, s + 3)));
           const a = (Math.atan2(q.y - p.y, q.x - p.x) * 180) / Math.PI;
           cart.setAttribute('transform', `translate(${p.x.toFixed(1)},${p.y.toFixed(1)}) rotate(${a.toFixed(1)})`);
         }

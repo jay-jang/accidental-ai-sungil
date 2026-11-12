@@ -284,7 +284,7 @@
         const W = 1046, H = 462, CELL = 14, IX = 2, IY = 40;
         const FC = 52, FX = IX + 392 + 64, FY = IY + 108, OX = W - 2 - 26 * CELL, OY = IY + 14;
         const host = el.querySelector('.cv-host');
-        const { cv, ctx } = K.canvas(host, W, H);
+        const { cv, ctx, scale } = K.canvas(host, W, H);
         const norm = (m) => { let M = 0; for (let i = 0; i < m.length; i++) M = Math.max(M, Math.abs(m[i])); return M * 0.8 || 1; };
         let key = 'v', cur = conv(IMG, FILTERS.v), curM = norm(cur), prev = cur, prevM = curM;
         let s = 676, hold = 0, hover = null, dirty = true;
@@ -296,8 +296,8 @@
           const i = Math.min(675, Math.floor(s));
           return { x: i % 26, y: (i / 26) | 0 };
         };
-        function grid(x0, y0, n) {
-          const C = K.colors();
+        const scoreTxt = (p) => { const val = cur[p.y * 26 + p.x]; return (val >= 0 ? '+' : '−') + Math.abs(val).toFixed(1); };
+        function grid(x0, y0, n, C) {
           ctx.strokeStyle = C.grid; ctx.lineWidth = 1;
           ctx.beginPath();
           for (let i = 1; i < n; i++) {
@@ -307,9 +307,7 @@
           ctx.stroke();
           ctx.strokeStyle = C.ink3; ctx.lineWidth = 2; ctx.strokeRect(x0, y0, n * CELL, n * CELL);
         }
-        function draw() {
-          const C = K.colors();
-          const p = pos();
+        function paint(C, p) {
           ctx.clearRect(0, 0, W, H);
           ctx.textBaseline = 'alphabetic';
           ctx.font = `600 21px ${C.fontMono}`; ctx.fillStyle = C.ink2;
@@ -328,7 +326,7 @@
             ctx.fillRect(IX + (i % 28) * CELL, IY + ((i / 28) | 0) * CELL, CELL, CELL);
           }
           ctx.globalAlpha = 1;
-          grid(IX, IY, 28);
+          grid(IX, IY, 28, C);
           // the 3×3 window: paper halo + pen outline so it reads on ink and on paper
           ctx.strokeStyle = C.paper; ctx.lineWidth = 8;
           ctx.strokeRect(IX + p.x * CELL, IY + p.y * CELL, 3 * CELL, 3 * CELL);
@@ -345,7 +343,7 @@
             ctx.fillRect(OX + (i % 26) * CELL, OY + ((i / 26) | 0) * CELL, CELL, CELL);
           }
           ctx.globalAlpha = 1;
-          grid(OX, OY, 26);
+          grid(OX, OY, 26, C);
           ctx.strokeStyle = C.paper; ctx.lineWidth = 7;
           ctx.strokeRect(OX + p.x * CELL - 1, OY + p.y * CELL - 1, CELL + 2, CELL + 2);
           ctx.strokeStyle = C.pen; ctx.lineWidth = 3.5;
@@ -373,22 +371,91 @@
           ctx.stroke();
           ctx.lineWidth = 3; ctx.strokeRect(FX, FY, 3 * FC, 3 * FC);
           // the multiply-and-add score at the window
-          const val = cur[p.y * 26 + p.x];
           ctx.textAlign = 'center';
           ctx.font = `500 21px ${C.fontBody}`; ctx.fillStyle = C.ink2;
           ctx.fillText('곱해서 다 더하면', FX + 1.5 * FC, FY + 3 * FC + 38);
           ctx.font = `600 38px ${C.fontMono}`; ctx.fillStyle = C.ink;
-          ctx.fillText((val >= 0 ? '+' : '−') + Math.abs(val).toFixed(1), FX + 1.5 * FC, FY + 3 * FC + 84);
+          ctx.fillText(scoreTxt(p), FX + 1.5 * FC, FY + 3 * FC + 84);
           ctx.textAlign = 'left';
           ctx.font = `500 21px ${C.fontBody}`; ctx.fillStyle = C.ink2;
           ctx.fillText('진할수록 그 무늬가 강하다', OX, OY + 26 * CELL + 32);
         }
+        /* What the canvas holds now. A full repaint of this 2-megapixel canvas on every sweep frame was the
+           cost here; redraw() repaints only the boxes that change between two states (old and new window,
+           swept output cells, the projection lines, the score). Each box is one clip rect on whole device
+           pixels, and inside it every op runs from scratch in the original order, so the pixels equal a full
+           repaint. One catch: Skia rasterizes a dashed path that crosses the clip edge slightly differently, so
+           the box of the dashed projection lines is merged with every box that touches it. */
+        let shown = null, patched = false, calm = 0;
+        const cellsOf = () => Math.min(676, Math.ceil(s)); // output cells drawn from `cur` (i < s)
+        function draw() {
+          const C = K.colors(), p = pos();
+          paint(C, p);
+          shown = { cur, prev, n: cellsOf(), p, txt: scoreTxt(p), C };
+          patched = false;
+        }
+        // [x0, y0, x1, y1] boxes in CSS px
+        const hit = (a, b) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+        const join = (a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])];
+        function linesBox(q) { // the three dashed projection lines for window q, padded for width and anti-aliasing
+          const xs = [IX + (q.x + 3) * CELL, FX, FX + 3 * FC, OX + (q.x + 0.5) * CELL];
+          const ys = [IY + q.y * CELL, IY + (q.y + 3) * CELL, FY, FY + 3 * FC, OY + (q.y + 0.5) * CELL];
+          return [Math.min(...xs) - 4, Math.min(...ys) - 4, Math.max(...xs) + 4, Math.max(...ys) + 4];
+        }
+        function redraw() {
+          const n = cellsOf();
+          // a new filter, or new faded cells under the sweep: those change most of the canvas
+          if (!shown || shown.cur !== cur || (shown.prev !== prev && Math.min(n, shown.n) < 676)) { draw(); return; }
+          const p = pos(), txt = scoreTxt(p);
+          let R = [];
+          if (p.x !== shown.p.x || p.y !== shown.p.y) {
+            [shown.p, p].forEach((q) => {
+              R.push([IX + q.x * CELL - 6, IY + q.y * CELL - 6, IX + (q.x + 3) * CELL + 6, IY + (q.y + 3) * CELL + 6]); // window + halo
+              R.push([OX + q.x * CELL - 6, OY + q.y * CELL - 6, OX + (q.x + 1) * CELL + 6, OY + (q.y + 1) * CELL + 6]); // output cell + ring
+            });
+            R.push(linesBox(shown.p));
+          }
+          if (n !== shown.n) { // output cells in [a, b) switch between faded and full
+            const a = Math.min(n, shown.n), b = Math.max(n, shown.n);
+            for (let r = Math.floor(a / 26); r * 26 < b; r++) {
+              const c0 = Math.max(a, r * 26) - r * 26, c1 = Math.min(b, r * 26 + 26) - r * 26;
+              R.push([OX + c0 * CELL - 2, OY + r * CELL - 2, OX + c1 * CELL + 2, OY + (r + 1) * CELL + 2]);
+            }
+          }
+          if (txt !== shown.txt) R.push([FX - 40, FY + 3 * FC + 44, FX + 3 * FC + 40, FY + 3 * FC + 106]);
+          if (!R.length) return;
+          // the dashed lines must lie wholly inside a box or wholly outside it
+          let L = linesBox(p), grew = true;
+          const used = R.map(() => false);
+          let any = false;
+          while (grew) {
+            grew = false;
+            R.forEach((r, i) => { if (!used[i] && hit(r, L)) { used[i] = true; L = join(L, r); grew = true; any = true; } });
+          }
+          R = R.filter((r, i) => !used[i]);
+          if (any) R.push(L);
+          R.forEach(([x, y, x2, y2]) => {
+            const dx0 = Math.max(0, Math.floor(x * scale)), dy0 = Math.max(0, Math.floor(y * scale));
+            const dx1 = Math.min(cv.width, Math.ceil(x2 * scale)), dy1 = Math.min(cv.height, Math.ceil(y2 * scale));
+            if (dx1 <= dx0 || dy1 <= dy0) return;
+            ctx.save();
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.beginPath(); ctx.rect(dx0, dy0, dx1 - dx0, dy1 - dy0); ctx.clip();
+            ctx.setTransform(scale, 0, 0, scale, 0, 0);
+            paint(shown.C, p);
+            ctx.restore();
+          });
+          shown = { cur, prev, n, p, txt, C: shown.C };
+          patched = true;
+        }
+        // a web-font slice that arrives later changes the canvas labels: repaint everything next time
+        if (document.fonts && document.fonts.addEventListener) document.fonts.addEventListener('loadingdone', () => { shown = null; });
         function setFilter(k) {
           if (k === key) { prev = cur; prevM = curM; s = 0; hold = 0; dirty = true; return; }
           key = k; prev = cur; prevM = curM; cur = conv(IMG, FILTERS[k]); curM = norm(cur); peak = peakOf(cur);
           s = hover ? 676 : 0; hold = 0; dirty = true;
           el.querySelectorAll('.chip[data-k]').forEach((c) => c.classList.toggle('on', c.dataset.k === k));
-          draw();
+          redraw();
         }
         el.querySelectorAll('.chip[data-k]').forEach((c) => c.addEventListener('click', () => setFilter(c.dataset.k)));
         const onPoint = (e) => {
@@ -400,20 +467,24 @@
             cx = Math.floor((pt.x - OX) / CELL); cy = Math.floor((pt.y - OY) / CELL);
           }
           if (cx < 0) { if (hover) { hover = null; dirty = true; } return; }
-          if (!hover || hover.x !== cx || hover.y !== cy) { hover = { x: cx, y: cy }; s = 676; dirty = true; draw(); }
+          if (!hover || hover.x !== cx || hover.y !== cy) { hover = { x: cx, y: cy }; s = 676; dirty = true; redraw(); }
         };
         cv.addEventListener('pointermove', onPoint);
         cv.addEventListener('pointerdown', onPoint);
-        cv.addEventListener('pointerleave', (e) => { if (e.pointerType === 'touch') return; hover = null; dirty = true; draw(); });
+        cv.addEventListener('pointerleave', (e) => { if (e.pointerType === 'touch') return; hover = null; dirty = true; redraw(); });
         K.loop(el, (t, dt) => {
           if (!hover) {
-            if (s < 676) { s = Math.min(676, s + dt * 150); dirty = true; if (s >= 676) hold = 2.4; }
+            // the sweep's last frame repaints in full, so the page re-rasters the whole canvas (as before) for the hold
+            if (s < 676) { s = Math.min(676, s + dt * 150); dirty = true; if (s >= 676) { hold = 2.4; shown = null; } }
             else if (hold > 0) { hold -= dt; if (hold <= 0) { prev = cur; prevM = curM; s = 0; } }
           }
-          if (dirty) { draw(); dirty = false; }
+          if (dirty) { redraw(); dirty = false; calm = 0; }
+          // after patches (e.g. the pointer now resting on the digit), one full repaint a third of a second later:
+          // Chrome re-rasters a canvas it saw only in small dirty boxes a few levels differently at their edges
+          else if (patched && ++calm > 20) draw();
         });
         this._restart = () => { prev = cur; prevM = curM; s = 676; hold = 1.6; hover = null; dirty = true; };
-        this._finish = () => { s = 676; hold = 0; hover = null; draw(); };
+        this._finish = () => { if (s < 676 || hover) shown = null; s = 676; hold = 0; hover = null; redraw(); };
         K.onTheme(draw);
         draw();
       },
@@ -597,8 +668,18 @@
         for (let y = BY; y < BY + BH; y++) for (let x = BX; x < BX + BW; x++) block.push(y * COLS + x);
         const order = scattered.concat(block); // 350 cells × 4만 장 = 1,400만 장
         let shown = order.length, anim = 0, playing = false;
+        let painted = 0, C = null, countTxt = counter.textContent;
+        function cell(k) {
+          const i = order[k], x = i % COLS, y = (i / COLS) | 0;
+          ctx.fillStyle = k >= scattered.length ? C.hl : C.ink;
+          ctx.fillRect(x * CELL + 0.4, y * CELL + 0.4, CELL - 1, CELL - 1);
+        }
+        function outline() {
+          ctx.strokeStyle = C.ink; ctx.lineWidth = 2.5;
+          ctx.strokeRect(BX * CELL - 3, BY * CELL - 3, BW * CELL + 5, BH * CELL + 5);
+        }
         function draw() {
-          const C = K.colors();
+          C = K.colors();
           ctx.clearRect(0, 0, W, H);
           ctx.fillStyle = C.ink3; ctx.globalAlpha = 0.34;
           ctx.beginPath();
@@ -607,17 +688,23 @@
           ctx.globalAlpha = 1;
           ctx.fillStyle = C.paper;
           ctx.fillRect(BX * CELL - 2, BY * CELL - 2, BW * CELL + 3, BH * CELL + 3);
-          for (let k = 0; k < shown; k++) {
-            const i = order[k], x = i % COLS, y = (i / COLS) | 0;
-            ctx.fillStyle = k >= scattered.length ? C.hl : C.ink;
-            ctx.fillRect(x * CELL + 0.4, y * CELL + 0.4, CELL - 1, CELL - 1);
-          }
-          if (shown > scattered.length) {
-            ctx.strokeStyle = C.ink; ctx.lineWidth = 2.5;
-            ctx.strokeRect(BX * CELL - 3, BY * CELL - 3, BW * CELL + 5, BH * CELL + 5);
-          }
+          for (let k = 0; k < shown; k++) cell(k);
+          if (shown > scattered.length) outline();
+          painted = shown;
         }
-        function setCount(n) { counter.textContent = n >= order.length ? '1,400만+' : fmt(n * 4) + '만'; }
+        /* During a count cells are only added, so paint just the new ones over what is there instead of
+           repainting 4,000 grey cells every frame. Same pixels as a full repaint: no device pixel is shared by
+           two cells (1 px gaps), and the block outline stays 1.3 px clear of every block cell. */
+        function drawMore() {
+          if (shown < painted) { draw(); return; }
+          for (let k = painted; k < shown; k++) cell(k);
+          if (shown > scattered.length && painted <= scattered.length) outline();
+          painted = shown;
+        }
+        function setCount(n) {
+          const txt = n >= order.length ? '1,400만+' : fmt(n * 4) + '만';
+          if (txt !== countTxt) { countTxt = txt; counter.textContent = txt; }
+        }
         function play() { anim = 0; playing = true; shown = 0; setCount(0); draw(); }
         el.querySelector('.again').addEventListener('click', play);
         K.loop(el, (t, dt) => {
@@ -626,11 +713,11 @@
           const p = K.clamp(anim / 3.2, 0, 1);
           shown = Math.round(order.length * K.ease(p));
           setCount(shown);
-          draw();
-          if (p >= 1) playing = false;
+          // the last frame repaints in full, so the page re-rasters the whole canvas once (as before) for the rest state
+          if (p >= 1) { playing = false; draw(); } else drawMore();
         });
         this._play = play;
-        this._finish = () => { playing = false; shown = order.length; setCount(shown); draw(); };
+        this._finish = () => { const was = playing || painted !== order.length; playing = false; shown = order.length; setCount(shown); if (was) draw(); };
         K.onTheme(draw);
         draw();
       },
@@ -745,8 +832,17 @@
         const N = CO * RO, CPU_DT = 0.034, rnd = K.rand(580);
         const gpuAt = Array.from({ length: N }, () => 0.1 + rnd() * 0.2);
         const GPU_END = Math.max(...gpuAt), CPU_END = N * CPU_DT;
-        let t = 99, running = false;
+        let t = 99, running = false, drawnKey = '';
+        /* Everything draw() shows, as a string: CPU cells, GPU cells, both clocks, running. The race only changes
+           it every few frames (a CPU cell each 0.034 s, the clocks each 0.1 s), so most frames repaint nothing. */
+        function stateKey() {
+          let g = 0;
+          for (let i = 0; i < N; i++) if (t >= gpuAt[i]) g++;
+          return `${running}|${Math.min(N, Math.floor(t / CPU_DT))}|${g}|${Math.min(t, CPU_END).toFixed(1)}|${Math.min(t, GPU_END).toFixed(1)}|${t >= CPU_END}`;
+        }
+        function update() { if (stateKey() !== drawnKey) draw(); }
         function draw() {
+          drawnKey = stateKey();
           const C = K.colors();
           ctx.clearRect(0, 0, W, H);
           ctx.textAlign = 'left'; ctx.fillStyle = C.ink;
@@ -780,16 +876,16 @@
           ctx.fillText(t >= CPU_END ? '끝' : '칠하는 중…', GX[0] + 96, GY + RO * CELL + 38);
           ctx.fillText('끝', GX[1] + 96, GY + RO * CELL + 38);
         }
-        function play() { t = 0; running = true; draw(); }
+        function play() { t = 0; running = true; update(); }
         el.querySelector('.again').addEventListener('click', play);
         K.loop(el, (tt, dt) => {
           if (!running) return;
           t += Math.max(0, dt);
           if (t >= CPU_END) { t = CPU_END; running = false; }
-          draw();
+          update();
         });
         this._play = play;
-        this._stop = () => { running = false; t = 99; draw(); };
+        this._stop = () => { running = false; t = 99; update(); };
         K.onTheme(draw);
         draw();
       },
@@ -885,7 +981,7 @@
           if (acc >= wait) { acc -= wait; v++; if (v >= FINAL) { v = FINAL; running = false; } render(); }
         });
         this._play = play;
-        this._stop = () => { running = false; v = FINAL; render(); };
+        this._stop = () => { if (running || v !== FINAL) { running = false; v = FINAL; render(); } };
         render();
       },
       enter() { this._play && this._play(); },
@@ -1018,7 +1114,7 @@
           if (acc >= 0.09) { acc = 0; const step = Math.max(1, Math.floor(r / 25)); setRound(r + step); if (r >= 300) auto = false; }
         });
         this._play = () => { auto = true; acc = 0; setRound(1); };
-        this._stop = () => { auto = false; setRound(300); };
+        this._stop = () => { auto = false; if (r !== 300) setRound(300); };
         K.onTheme(draw);
         draw();
       },
@@ -1125,7 +1221,7 @@
           el.querySelectorAll('.game').forEach((g) => g.classList.toggle('on', g.dataset.g === (k === '37' ? '2' : '4')));
         }
         el.querySelectorAll('[data-pick]').forEach((b) => b.addEventListener('click', () => pick(b.dataset.pick)));
-        this._reset = () => pick('37');
+        this._reset = () => { if (story.dataset.cur !== '37') pick('37'); };
         K.onTheme(drawGauge);
         drawGauge();
         pick('37');
@@ -1285,7 +1381,11 @@
           while (flashes.length && t - flashes[0].t > 0.35) flashes.shift();
           if (changed) draw(t);
         });
-        this._finish = () => { while (sims < target) { mctsStep(root, rnd); sims++; } flashes.length = 0; draw(); };
+        this._finish = () => {
+          if (sims >= target && !flashes.length) return; // the canvas already shows this (the last flash was drawn out)
+          while (sims < target) { mctsStep(root, rnd); sims++; }
+          flashes.length = 0; draw();
+        };
         reset(100);
         K.onTheme(() => draw());
         draw();
@@ -1348,14 +1448,20 @@
         }
         const CIRC = 2 * Math.PI * 168;
         arc.style.strokeDasharray = `${CIRC} ${CIRC}`;
-        let left = TOTAL, endAt = 0, running = false;
+        let left = TOTAL, endAt = 0, running = false, arcOff = -1;
+        const goBtn = el.querySelector('.go');
         function render() {
           const s = Math.max(0, Math.ceil(left));
-          num.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-          arc.style.strokeDashoffset = String(CIRC * (1 - left / TOTAL));
+          const txt = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+          if (num.textContent !== txt) num.textContent = txt;
+          // while running the arc end creeps 1.8 px a second: repaint the ring when it has moved 1/8 px, not every
+          // frame (about 14 times a second instead of 60). Paused, stopped or done, it gets the exact value.
+          const off = CIRC * (1 - left / TOTAL);
+          if (!running || Math.abs(off - arcOff) >= 0.125) { arcOff = off; arc.style.strokeDashoffset = String(off); }
           digits.classList.toggle('done', left <= 0);
-          lab.textContent = left <= 0 ? '2교시 시작!' : running ? '쉬는 중…' : left < TOTAL ? '멈춤' : '쉬는 시간';
-          el.querySelector('.go').classList.toggle('on', running);
+          const lt = left <= 0 ? '2교시 시작!' : running ? '쉬는 중…' : left < TOTAL ? '멈춤' : '쉬는 시간';
+          if (lab.textContent !== lt) lab.textContent = lt;
+          goBtn.classList.toggle('on', running);
         }
         el.querySelector('.go').addEventListener('click', () => { if (left <= 0) left = TOTAL; endAt = Date.now() + left * 1000; running = true; render(); });
         el.querySelector('.pause').addEventListener('click', () => { if (running) { left = Math.max(0, (endAt - Date.now()) / 1000); running = false; render(); } });

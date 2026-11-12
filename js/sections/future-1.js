@@ -541,14 +541,18 @@
         const t3 = S('text', { class: 'num', x: xs[2] + bw / 2, 'text-anchor': 'middle' }, svg);
         [['새로 생김', 0], ['사라짐', 1], ['순증', 2]].forEach(([s, i]) => { S('text', { class: 'cat', x: xs[i] + bw / 2, y: base + 38, 'text-anchor': 'middle' }, svg).textContent = s; });
         const fmt = (v) => { if (v < 100) return `${won(v * 100)}만`; const r = Math.round((v - 100) * 100); return r ? `1억 ${won(r)}만` : '1억'; }; // v: 백만 개
+        // the bars grow one after another: skip rewrites of values that did not change, since an unchanged
+        // attribute or text rewrite still re-lays out and repaints the element
+        const setA = (n, a, v) => { v = String(v); if (n.getAttribute(a) !== v) n.setAttribute(a, v); };
+        const setT = (n, s) => { if (n.textContent !== s) n.textContent = s; };
         function draw(p1, p2, p3) {
           const h1 = 170 * k * p1, h2 = 92 * k * p2, h3 = 78 * k * p3;
-          b1.setAttribute('y', base - h1); b1.setAttribute('height', h1);
-          b2.setAttribute('y', yTop); b2.setAttribute('height', h2);
-          b3.setAttribute('y', base - h3); b3.setAttribute('height', h3);
-          t1.setAttribute('y', base - h1 - 16); t1.textContent = '+' + fmt(170 * p1);
-          t2.setAttribute('y', yTop + h2 + 42); t2.textContent = '−' + fmt(92 * p2);
-          t3.setAttribute('y', base - h3 - 16); t3.textContent = '+' + fmt(78 * p3);
+          setA(b1, 'y', base - h1); setA(b1, 'height', h1);
+          setA(b2, 'y', yTop); setA(b2, 'height', h2);
+          setA(b3, 'y', base - h3); setA(b3, 'height', h3);
+          setA(t1, 'y', base - h1 - 16); setT(t1, '+' + fmt(170 * p1));
+          setA(t2, 'y', yTop + h2 + 42); setT(t2, '−' + fmt(92 * p2));
+          setA(t3, 'y', base - h3 - 16); setT(t3, '+' + fmt(78 * p3));
           t1.style.opacity = p1 > 0.02 ? 1 : 0; t2.style.opacity = p2 > 0.02 ? 1 : 0; t3.style.opacity = p3 > 0.02 ? 1 : 0;
         }
         draw(1, 1, 1);
@@ -994,7 +998,9 @@
         K.loop(el, (t, dt) => {
           apps.forEach((a) => a.tick(dt));
           if (!R.running) return;
-          dots.textContent = '에이전트가 만드는 중' + '...'.slice(0, 1 + (Math.floor(t * 3) % 3));
+          // text writes re-lay out and repaint even when the string is unchanged: skip those
+          const dotTxt = '에이전트가 만드는 중' + '...'.slice(0, 1 + (Math.floor(t * 3) % 3));
+          if (dots.textContent !== dotTxt) dots.textContent = dotTxt;
           R.wait -= dt;
           if (R.wait > 0) return;
           const L = SCRIPTS[R.s].lines[R.i];
@@ -1003,8 +1009,8 @@
           if (L[1] === 'code' || L[1] === 'add') {
             if (!R.typing) { R.typing = { node: addLine(L, ''), n: 0 }; R.typing.node.insertAdjacentHTML('beforeend', '<span class="cur"></span>'); }
             R.typing.n += dt * 58;
-            const n = Math.min(L[2].length, Math.floor(R.typing.n));
-            R.typing.node.querySelector('.tx').textContent = L[2].slice(0, n);
+            const n = Math.min(L[2].length, Math.floor(R.typing.n)), tx = R.typing.node.querySelector('.tx');
+            if (tx.textContent !== L[2].slice(0, n)) tx.textContent = L[2].slice(0, n);
             if (n >= L[2].length) { R.typing.node.querySelector('.cur').remove(); R.typing = null; R.i++; R.wait = 0.06; }
           } else {
             addLine(L, L[2]); R.i++;

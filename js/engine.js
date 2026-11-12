@@ -22,7 +22,7 @@
     (Deck.parts[sectionId] || (Deck.parts[sectionId] = [])).push({ order, frames });
   };
 
-  let viewport, world, decor, gridEl, gridLayers = [];
+  let viewport, world, decor, gridEl;
   let vw = innerWidth, vh = innerHeight;
   let insetB = 0; // px reserved at the bottom for the touch bar
   const vhE = () => Math.max(120, vh - insetB);
@@ -89,26 +89,135 @@
     return { x: worldBox.x + worldBox.w / 2, y: worldBox.y + worldBox.h / 2 - capH / 2, w, r: 0 };
   }
   Deck.worldCam = worldCam;
+  // the camera for the current state at the current screen size (free roaming keeps its own)
+  function fitCam() {
+    if (Deck.overview) Object.assign(cam, worldCam());
+    else if (!Deck.free) Object.assign(cam, camForFrame(Deck.frames[Deck.idx]));
+  }
 
   function applyCam() {
     const k = vw / cam.w;
     world.style.transform = `translate(${vw / 2}px,${vhE() / 2}px) rotate(${-cam.r}deg) scale(${k}) translate(${-cam.x}px,${-cam.y}px)`;
-    // graph paper: 4 grid levels with spacing 8·5ⁿ world units, faded by on-screen spacing
-    const nmin = Math.ceil(Math.log(8 / k / 8) / Math.log(5));
-    gridEl.style.transform = `rotate(${-cam.r}deg)`;
-    const gw = gridEl.offsetWidth, gh = gridEl.offsetHeight;
-    for (let j = 0; j < gridLayers.length; j++) {
-      const n = nmin + j, g = 8 * Math.pow(5, n), s = g * k;
-      const a = smooth(6, 30, s) * (1 - smooth(500, 1600, s));
-      const L = gridLayers[j];
-      if (a < 0.01) { L.style.opacity = 0; continue; }
-      const ox = (((gw / 2 - cam.x * k) % s) + s) % s, oy = (((gh / 2 - insetB / 2 - cam.y * k) % s) + s) % s;
-      L.style.opacity = (a * (0.55 + 0.45 * Math.min(1, j / 2))).toFixed(3);
-      L.style.backgroundSize = `${s}px ${s}px`;
-      L.style.backgroundPosition = `${ox}px ${oy}px`;
-    }
+    drawGrid(k);
+    // reveal what comes on screen now; hiding what left it waits for an idle moment, so frames never
+    // flip on and off mid-motion. (During a flight, flyTo reveals frames just before they are due.)
+    if (!flight) { cullFrames([viewCircle(cam, 1.15)], true); if (!handOn) hideLater(); }
     if (minimapOn()) drawMinimap();
     placeFocus();
+  }
+
+  /* Frames nowhere near the screen are not painted (.off = visibility:hidden; layout stays, so demos
+     can still measure themselves). Without this, every commit pushes all ~25 demo canvases and a
+     layer list for the whole world, even when only one frame is on screen. Circle tests, generous. */
+  function viewCircle(c, margin) {
+    return { x: c.x, y: c.y, r: ((Math.hypot(vw, vh) / 2 + insetB) * (c.w / vw)) * margin };
+  }
+  function inView(f, v) {
+    const fr = f._cullR || (f._cullR = (Math.hypot(DW, DH) / 2) * f.s * 1.35);
+    const dx = f.cx - v.x, dy = f.cy - v.y, lim = fr + v.r;
+    return dx * dx + dy * dy <= lim * lim;
+  }
+  function setOff(f, off) { if (off !== !!f._off) { f._off = off; f.el.classList.toggle('off', off); } }
+  function cullFrames(views, revealOnly) {
+    for (const f of Deck.frames) {
+      if (!f.el) continue;
+      const off = !views.some((v) => inView(f, v));
+      if (off && revealOnly) continue;
+      setOff(f, off);
+    }
+  }
+  let hideQueued = false;
+  const whenIdle = window.requestIdleCallback ? (fn) => requestIdleCallback(fn, { timeout: 700 }) : (fn) => setTimeout(fn, 120);
+  function hideLater() {
+    if (hideQueued) return;
+    hideQueued = true;
+    whenIdle(() => { hideQueued = false; if (!flight && !handOn) cullFrames([viewCircle(cam, 1.15)], false); });
+  }
+
+  /* graph paper: 4 grid levels with spacing 8·5ⁿ world units, faded by on-screen spacing.
+     Each level is two SVG paths of 1px-wide rects (vertical, horizontal). It used to be 4 full-screen
+     layers of tiny tiled CSS gradients: with software raster — common on Windows PCs whose GPU Chrome
+     blocklists — re-rasterizing those on every camera step cost ~5 s of CPU per flight. Plain rects
+     are cheap to raster. Not a <canvas>: a canvas is always its own compositor layer, which pushes the
+     whole world into a separate layer that Chrome rasterizes unrotated and then resamples, so text in
+     the tilted sections went soft. SVG paints into the page like the old gradients did. */
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  let gridG = null, gridPaths = [], gridRot = null;
+  function buildGrid() {
+    gridG = document.createElementNS(SVGNS, 'g');
+    for (let i = 0; i < 8; i++) gridPaths.push({ el: gridG.appendChild(document.createElementNS(SVGNS, 'path')), d: '', o: '' });
+    gridEl.appendChild(gridG);
+  }
+  const f2 = (v) => Math.round(v * 100) / 100;
+  function drawGrid(k) {
+    if (!gridG) return;
+    // read live: moving the window to a screen with another scale factor changes it without a resize
+    const d = window.devicePixelRatio || 1, cx = vw / 2, cy = vh / 2;
+    const straight = Math.abs(cam.r % 360) < 1e-6;
+    // turn about the world's own centre of rotation (it sits insetB/2 higher when the touch bar is shown)
+    const rot = straight ? '' : `rotate(${f2(-cam.r)} ${cx} ${f2(cy - insetB / 2)})`;
+    if (rot !== gridRot) {
+      gridRot = rot;
+      if (rot) gridG.setAttribute('transform', rot); else gridG.removeAttribute('transform');
+      // axis-aligned, pixel-snapped rects need no antialiasing, which makes them several times cheaper
+      // to raster in software; tilted lines keep it
+      if (rot) gridG.removeAttribute('shape-rendering'); else gridG.setAttribute('shape-rendering', 'crispEdges');
+    }
+    // when rotated, cover the whole screen with lines spanning its diagonal
+    const R = straight ? 0 : Math.hypot(vw, vh) / 2 - Math.min(vw, vh) / 2 + insetB + 2;
+    const x0 = f2(-R), x1 = f2(vw + R), y0 = f2(-R), y1 = f2(vh + R);
+    // pixel-snap only when axis-aligned (rotated lines are antialiased anyway)
+    const snap = straight ? (v) => Math.round(v * d) / d : f2;
+    // a whole number of device pixels (1 at 100–125 % scaling, 2 at 150–200 %): this matches the ink of the
+    // old 1 CSS px gradient bands within a few % at every scale, in software and GPU raster alike
+    // (a fixed 1 CSS px came out ~20 % heavier at 125 % on GPU; a single device pixel, half as dark at 150 %)
+    const px = +(Math.max(1, Math.round(d)) / d).toFixed(4);
+    const ox = cx - cam.x * k, oy = cy - insetB / 2 - cam.y * k;
+    const nmin = Math.ceil(Math.log(1 / k) / Math.log(5));
+    for (let j = 0; j < 4; j++) {
+      const n = nmin + j, g = 8 * Math.pow(5, n), s = g * k;
+      const a = smooth(6, 30, s) * (1 - smooth(500, 1600, s));
+      let dv = '', dh = '', o = '';
+      if (a >= 0.01) {
+        o = (a * (0.55 + 0.45 * Math.min(1, j / 2))).toFixed(3);
+        // lines sit where world x (or y) is a multiple of g, exactly as the world transform maps them
+        for (let x = ox + Math.ceil((x0 - ox) / s) * s; x <= x1; x += s) { const X = snap(x); dv += `M${X} ${y0}h${px}V${y1}h-${px}z`; }
+        for (let y = oy + Math.ceil((y0 - oy) / s) * s; y <= y1; y += s) { const Y = snap(y); dh += `M${x0} ${Y}v${px}H${x1}v-${px}z`; }
+      }
+      setGridPath(gridPaths[2 * j], dv, o);
+      setGridPath(gridPaths[2 * j + 1], dh, o);
+    }
+  }
+  function setGridPath(p, dd, o) {
+    if (dd !== p.d) { p.d = dd; if (dd) p.el.setAttribute('d', dd); else p.el.removeAttribute('d'); }
+    if (o !== p.o) { p.o = o; p.el.setAttribute('fill-opacity', o || '0'); }
+  }
+
+  /* While the camera moves (a flight, or wheel/drag/pinch by hand) the world is one composited layer
+     (will-change) so each step is a cheap transform, not a re-raster of every photo and glyph; the hint
+     is dropped when motion ends so Chrome re-rasterizes once, crisp, at the final zoom.
+     Set as inline styles on purpose: a class on #world restyles thousands of descendants (8–30 ms per
+     toggle), the inline value only #world. A shield, not pointer-events on the frames, keeps hover and
+     clicks out of the frames while flying, for the same reason. */
+  let handT = 0, handOn = false, composited = false, shield = null;
+  function syncMotion() {
+    // (not kept at rest on the map/overview either: at 100 % scaling the layer stays rasterized at a
+    // flight scale there and the tiny text in the thumbnails goes soft)
+    const on = !!flight || handOn;
+    if (on !== composited) { composited = on; world.style.willChange = on ? 'transform' : ''; }
+    if (shield) shield.hidden = !flight;
+  }
+  function handMotion() {
+    if (!handOn) { handOn = true; syncMotion(); }
+    clearTimeout(handT);
+    handT = setTimeout(() => {
+      handOn = false; syncMotion();
+      if (!flight) hideLater();
+    }, 260);
+  }
+  function stopFlight() {
+    if (!flight) return;
+    cancelAnimationFrame(flight.raf); flight = null; syncMotion();
   }
   // on phones the screen is rarely 16:9, so neighbours crowd the edges: veil everything outside the current frame
   let focusEl = null;
@@ -123,27 +232,56 @@
   }
   function smooth(a, b, x) { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
 
+  let flightSeq = 0;
   function flyTo(target, opts) {
     opts = opts || {};
     if (flight) cancelAnimationFrame(flight.raf);
     const from = { ...cam };
     if (opts.instant || reduced) {
-      flight = null; Object.assign(cam, target); applyCam(); world.classList.remove('moving');
+      flight = null; Object.assign(cam, target); applyCam(); syncMotion();
       opts.done && opts.done(); return;
     }
     const zi = interpolateZoom([from.x, from.y, from.w], [target.x, target.y, target.w]);
     let dr = (target.r - from.r) % 360; if (dr > 180) dr -= 360; if (dr < -180) dr += 360;
     const dur = Math.max(650, Math.min(2100, 420 + zi.S * 520 + Math.abs(dr) * 12)) * (opts.speed || 1);
     const t0 = performance.now();
-    world.classList.add('moving');
+    // Hidden frames the camera will pass over are revealed shortly before they come on screen, not all at
+    // once (a zoom-out to the map would otherwise paint all 92 frames in its first frame). Each gets the
+    // path position where it first meets the (generous) view; nothing is hidden during the flight.
+    const N = 48, due = [];
+    for (let i = 0; i <= N; i++) {
+      const p = zi(i / N), v = viewCircle({ x: p[0], y: p[1], w: p[2] }, 1.3);
+      for (const f of Deck.frames) {
+        if (!f.el || !f._off || f._dueAt === flightSeq + 1) continue;
+        if (inView(f, v)) { f._dueAt = flightSeq + 1; f._due = Math.max(0, (i - 1) / N); due.push(f); }
+      }
+    }
+    flightSeq++;
+    due.sort((a, b) => a._due - b._due);
+    let di = 0, last = t0;
+    const reveal = (now) => {
+      // look ahead in time (at least 150 ms, more when frames come slowly) along the eased path
+      const ahead = Kit.ease(Math.min(1, (now - t0 + Math.max(150, 3 * (now - last))) / dur));
+      last = now;
+      while (di < due.length && due[di]._due <= ahead) setOff(due[di++], false);
+    };
+    reveal(t0);
     flight = { raf: 0 };
+    syncMotion();
     const tick = (now) => {
+      reveal(now);
       const t = Math.min(1, (now - t0) / dur), e = Kit.ease(t);
       const p = zi(e);
       cam.x = p[0]; cam.y = p[1]; cam.w = p[2]; cam.r = from.r + dr * e;
       applyCam();
       if (t < 1) flight.raf = requestAnimationFrame(tick);
-      else { cam.r = target.r; flight = null; applyCam(); world.classList.remove('moving'); opts.done && opts.done(); }
+      else {
+        cam.r = target.r;
+        const resized = flight.resized;
+        flight = null;
+        if (resized) fitCam();
+        applyCam(); syncMotion(); opts.done && opts.done();
+      }
     };
     flight.raf = requestAnimationFrame(tick);
   }
@@ -221,12 +359,18 @@
   }
   function initAllIdle() {
     const queue = Deck.frames.slice();
+    const later = window.requestIdleCallback ? (fn) => requestIdleCallback(fn, { timeout: 200 }) : (fn) => setTimeout(fn, 16);
     const run = (deadline) => {
+      // keep going while the camera moves (the opening flight, or someone pressing → right after load),
+      // so demos are ready when they come on screen; mid-motion only use the idle time left in the frame
+      const moving = flight || handOn;
+      const left = deadline && deadline.timeRemaining ? deadline.timeRemaining() : 4;
+      const budget = moving ? Math.min(8, left) : 12;
       const t0 = performance.now();
-      while (queue.length && performance.now() - t0 < 12) ensureInit(queue.shift());
-      if (queue.length) (window.requestIdleCallback || setTimeout)(run, { timeout: 200 });
+      do ensureInit(queue.shift()); while (queue.length && performance.now() - t0 < budget);
+      if (queue.length) later(run);
     };
-    (window.requestIdleCallback || setTimeout)(run, { timeout: 200 });
+    later(run);
   }
 
   let loopRaf = 0, loopLast = 0;
@@ -257,13 +401,16 @@
   function leave(f) {
     if (!f) return;
     stopLoops();
-    if (f.el) { f.el.classList.remove('current'); clearSteps(f); }
+    if (f.el) { f.el.classList.remove('current', 'deck-arrived'); clearSteps(f); }
     if (arrivedIdx === f.idx) { try { f.leave && f.leave(f.el, Kit, f); } catch (e) { console.error(e); } }
     arrivedIdx = -1;
   }
   function arrive(f) {
     if (!f || Deck.frames[Deck.idx] !== f) return;
     arrivedIdx = f.idx;
+    // build-step fades run from here on; while the camera flies in, pending steps are hidden instantly
+    // (otherwise every step element animates, as its own layer, during the flight)
+    if (f.el) f.el.classList.add('deck-arrived');
     try { f.enter && f.enter(f.el, Kit, f); } catch (e) { console.error(e); }
     startLoops(f);
   }
@@ -284,7 +431,7 @@
     ensureInit(f);
     Deck.step = opts.step === 'end' ? f.steps || 0 : opts.step || 0;
     document.body.dataset.frame = f.id;
-    if (f.el) { f.el.classList.add('current'); applySteps(f); }
+    if (f.el) { f.el.classList.remove('deck-arrived'); f.el.classList.add('current'); applySteps(f); }
     if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
     flyTo(camForFrame(f), { instant: opts.instant, done: () => arrive(f) });
     touchTimer(f);
@@ -487,8 +634,9 @@
     const f = Deck.frames[Deck.idx]; if (!f || !H.timer) return;
     const t = timers[f.lecture || 1], el = tElapsed(t), plan = plannedBefore(f) * 60000;
     const late = el - plan > 3 * 60000;
-    H.timer.className = t.run ? 'running' : '';
-    H.timer.innerHTML = `${f.lecture || 1}교시 <span class="${late ? 'late' : ''}">${mmss(el)}</span> / 계획 ${mmss(plan)}`;
+    const cls = t.run ? 'running' : '', html = `${f.lecture || 1}교시 <span class="${late ? 'late' : ''}">${mmss(el)}</span> / 계획 ${mmss(plan)}`;
+    if (H.timer.className !== cls) H.timer.className = cls;
+    if (H.timer._html !== html) { H.timer._html = html; H.timer.innerHTML = html; } // skip the DOM write when nothing changed
   }
 
   function updateHUD() {
@@ -519,7 +667,8 @@
   }
 
   /* minimap */
-  let minimapPinned = Kit.store.get('minimap', false);
+  let minimapPinned = Kit.store.get('minimap', false), mmColors = null;
+  Kit.onTheme(() => { mmColors = null; });
   function minimapOn() { return minimapPinned || (Deck.free && !Deck.overview); }
   function drawMinimap() {
     const c = H.mm; if (!c) return;
@@ -527,7 +676,7 @@
     const dpr = 2;
     if (c.width !== Wpx * dpr) { c.width = Wpx * dpr; c.height = Hpx * dpr; c.style.width = Wpx + 'px'; c.style.height = Hpx + 'px'; }
     c._s = s;
-    const ctx = c.getContext('2d'), C = Kit.colors();
+    const ctx = c.getContext('2d'), C = mmColors || (mmColors = Kit.colors()); // getComputedStyle once per theme, not per camera step
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, Wpx, Hpx);
     const cur = Deck.frames[Deck.idx];
@@ -709,6 +858,7 @@
   }
 
   function frameAt(x, y) {
+    if (flight) return null; // frames take no pointer input mid-flight (the shield covers them)
     const els = document.elementsFromPoint(x, y);
     for (const el of els) { const fr = el.closest && el.closest('.frame'); if (fr && fr.__frame) return fr.__frame; }
     return null;
@@ -719,8 +869,14 @@
     addEventListener('resize', () => {
       vw = innerWidth; vh = innerHeight;
       insetB = TOUCH && H.tb ? H.tb.offsetHeight : 0;
-      if (Deck.overview) Object.assign(cam, worldCam());
-      else if (!Deck.free) Object.assign(cam, camForFrame(Deck.frames[Deck.idx]));
+      if (flight) {
+        // the flight's reveal plan and target were made for the old size (a phone turned mid-flight):
+        // show every frame for the rest of it (idle-hide trims afterwards) and re-fit when it lands
+        for (const f of Deck.frames) if (f.el) setOff(f, false);
+        flight.resized = true;
+        return;
+      }
+      fitCam();
       applyCam();
     });
     addEventListener('hashchange', () => {
@@ -741,15 +897,16 @@
       cam.w = Math.max(160, Math.min(W * 2.5, cam.w * Math.exp(dz)));
       const after = screenToWorld(e.clientX, e.clientY);
       cam.x += before.x - after.x; cam.y += before.y - after.y;
-      if (flight) { cancelAnimationFrame(flight.raf); flight = null; world.classList.remove('moving'); }
+      stopFlight();
       if (!Deck.free) { Deck.free = true; stopLoops(); updateHUD(); }
+      handMotion();
       applyCam();
     }, { passive: false });
 
     let drag = null, pinch = null, lastTap = null, lastType = 'mouse';
     const touches = new Map();
     const enterFree = () => {
-      if (flight) { cancelAnimationFrame(flight.raf); flight = null; world.classList.remove('moving'); }
+      stopFlight();
       if (!Deck.free) { Deck.free = true; stopLoops(); updateHUD(); }
     };
     const maxW = () => worldCam().w * 2.5;
@@ -776,7 +933,7 @@
         cam.w = Math.max(160, Math.min(maxW(), (pinch.w0 * pinch.d0) / p.d));
         const now = screenToWorld(p.mx, p.my);
         cam.x += pinch.wp.x - now.x; cam.y += pinch.wp.y - now.y;
-        applyCam(); return;
+        handMotion(); applyCam(); return;
       }
       if (!drag) return;
       const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
@@ -791,7 +948,7 @@
         const wx = (e.clientX - drag.x) / k, wy = (e.clientY - drag.y) / k;
         cam.x = drag.cx - (wx * Math.cos(a) - wy * Math.sin(a));
         cam.y = drag.cy - (wx * Math.sin(a) + wy * Math.cos(a));
-        applyCam();
+        handMotion(); applyCam();
       }
     });
     const release = (e, cancelled) => {
@@ -844,12 +1001,9 @@
     if (saved) document.documentElement.setAttribute('data-theme', saved);
     viewport = document.getElementById('viewport');
     world = document.getElementById('world');
+    shield = document.createElement('div'); shield.id = 'shield'; shield.hidden = true; viewport.appendChild(shield);
     gridEl = document.getElementById('grid');
-    for (let j = 0; j < 4; j++) {
-      const L = document.createElement('div');
-      L.style.backgroundImage = 'linear-gradient(var(--grid-line) 1px, transparent 1px), linear-gradient(90deg, var(--grid-line) 1px, transparent 1px)';
-      gridEl.appendChild(L); gridLayers.push(L);
-    }
+    buildGrid();
     buildFrames();
     worldBox = Deck.Layout.compute(Deck.SECTIONS, Deck.frames);
     decor = Deck.Layout.decor(Deck.SECTIONS, Deck.frames, worldBox);

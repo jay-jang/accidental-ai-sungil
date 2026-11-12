@@ -6,6 +6,8 @@
   const K = window.Kit;
 
   /* ───────── shared helpers ───────── */
+  // Chrome replaces the text node even when the new text is identical (style recalc + layout), so skip such writes.
+  const setText = (n, s) => { s = String(s); if (n.textContent !== s) n.textContent = s; };
   /** hand-drawn ring as an SVG path d (slight overshoot like a pen loop) */
   function ring(cx, cy, r, seed) {
     const rnd = K.rand(seed), pts = [], n = 18, a0 = -1.2 + rnd() * 0.5;
@@ -538,8 +540,11 @@
           const tg = target();
           st.shown.forEach((v, i) => {
             const a = ang(v), cx = D[i][0];
-            ptrs[i].setAttribute('x2', cx + Math.sin(a) * 44); ptrs[i].setAttribute('y2', 104 - Math.cos(a) * 44);
-            dvs[i].textContent = fmt(tg[i]);
+            // runs every frame while any dial turns: leave the dials and values that did not change untouched
+            const x2 = String(cx + Math.sin(a) * 44), y2 = String(104 - Math.cos(a) * 44);
+            if (ptrs[i].getAttribute('x2') !== x2) ptrs[i].setAttribute('x2', x2);
+            if (ptrs[i].getAttribute('y2') !== y2) ptrs[i].setAttribute('y2', y2);
+            setText(dvs[i], fmt(tg[i]));
           });
         };
         const drawTable = () => {
@@ -638,6 +643,7 @@
         };
         log.addEventListener('scroll', fade);
         f.enter = fade; // layout may differ from init time (fonts)
+        let seeding = true; // the opening lines: scroll and fade once at the end, not once per line (each forces a layout)
         const add = (who, text, why) => {
           const d = document.createElement('div');
           d.className = 'e-line';
@@ -645,6 +651,7 @@
           log.appendChild(d);
           if (why) { const w = document.createElement('div'); w.className = 'e-why'; w.textContent = '└ ' + why; log.appendChild(w); }
           while (log.children.length > 60) log.removeChild(log.firstChild);
+          if (seeding) return;
           log.scrollTop = log.scrollHeight;
           fade();
         };
@@ -679,6 +686,9 @@
         el.querySelectorAll('.e-ex').forEach((b) => b.addEventListener('click', () => send(b.textContent)));
         add('E', '안녕. 나는 ELIZA야. 요즘 무슨 고민이 있니?');
         ['엄마가 맨날 공부하래', '나는 게임이 더 좋은데', '내 방이 너무 싫어'].forEach(send);
+        seeding = false;
+        log.scrollTop = log.scrollHeight;
+        fade();
       },
     },
 
@@ -805,13 +815,16 @@
               ctx.fillStyle = C.bad; ctx.font = `600 22px ${C.fontBody}`; ctx.fillText('틀림', p.x, p.b ? p.y + 62 : p.y - 46);
             }
           });
-          // status
-          el.querySelector('.x-err').innerHTML = `틀린 점 <span style="color:${ev.err ? 'var(--bad)' : 'var(--good)'}">${ev.err}개</span>`;
-          const best = el.querySelector('.x-best');
-          if (st.lines.length === 1) best.textContent = st.tries ? `시도 ${st.tries}번 · 최고 기록 ${st.best}개. 직선 하나로는 0개가 안 된다.` : '손잡이를 끌어 보세요 · 노란 쪽 = ‘1’ 구역';
-          else best.innerHTML = ev.err ? '두 번째 직선도 끌어 보세요.' : '<b class="good">두 직선이면 된다 = 층을 쌓으면 된다.</b> 문제는 그 층을 어떻게 학습시키나 → 1986';
+          // status (draw() runs on every drag move; rewrite the lines only when they change)
+          const eh = `틀린 점 <span style="color:${ev.err ? 'var(--bad)' : 'var(--good)'}">${ev.err}개</span>`;
+          if (eh !== errHtml) { el.querySelector('.x-err').innerHTML = eh; errHtml = eh; }
+          let bh;
+          if (st.lines.length === 1) bh = K.escape(st.tries ? `시도 ${st.tries}번 · 최고 기록 ${st.best}개. 직선 하나로는 0개가 안 된다.` : '손잡이를 끌어 보세요 · 노란 쪽 = ‘1’ 구역');
+          else bh = ev.err ? '두 번째 직선도 끌어 보세요.' : '<b class="good">두 직선이면 된다 = 층을 쌓으면 된다.</b> 문제는 그 층을 어떻게 학습시키나 → 1986';
+          if (bh !== bestHtml) { el.querySelector('.x-best').innerHTML = bh; bestHtml = bh; }
           return ev;
         }
+        let errHtml = null, bestHtml = null;
         const handleAt = (p) => { let hit = null, bd = 34; st.lines.forEach((L, li) => L.forEach((q, qi) => { const d = Math.hypot(q.x - p.x, q.y - p.y); if (d < bd) { bd = d; hit = [li, qi]; } })); return hit; };
         cv.addEventListener('pointerdown', (e) => { const p = K.pt(e, cv); const h = handleAt(p); if (!h) return; st.drag = h; cv.setPointerCapture(e.pointerId); cv.style.cursor = 'grabbing'; e.preventDefault(); });
         cv.addEventListener('pointermove', (e) => {
@@ -933,38 +946,52 @@
           st.log.push({ t: ruleText(n, exc), exc });
           if (st.log.length > 4) st.log.shift();
         }
+        // render() runs every frame for about a second after each click. Re-parsing the whole tree (up to ~400 nodes)
+        // each frame was most of that cost, so the markup is rebuilt only when the element list changes (new rules,
+        // a link starting to grow, the gauge label appearing); otherwise only the attributes that changed are set.
+        // Same markup, same attribute strings, so the resulting DOM is the same either way.
+        const LEGEND = `<rect x="370" y="6" width="140" height="40" rx="6" style="fill:var(--ink)"/><text x="440" y="34" text-anchor="middle" style="font-family:var(--font-body);font-weight:600;font-size:21px;fill:var(--paper)">주문서 입력</text>` +
+          `<g transform="translate(598,32)"><circle cx="0" cy="-6" r="7" style="fill:var(--paper);stroke:var(--ink);stroke-width:2.5"/><text x="14" y="0" style="font-family:var(--font-mono);font-size:20px;fill:var(--ink-2)">규칙</text><circle cx="92" cy="-6" r="7" style="fill:var(--paper);stroke:var(--bad);stroke-width:2.5;stroke-dasharray:3 2"/><text x="106" y="0" style="font-family:var(--font-mono);font-size:20px;fill:var(--bad)">예외</text><path d="M170,-6 h34" style="stroke:var(--bad);stroke-width:2;stroke-dasharray:6 6"/><text x="210" y="0" style="font-family:var(--font-mono);font-size:20px;fill:var(--bad)">얽힘</text></g>`;
+        // items: [tag, [[attr, value], ...], text?] in document order (text is constant); `tail` is constant markup after them
+        function patch(host, items, tail) {
+          const sig = items.map((it) => it[0] + (it[2] || '')).join() + '|' + tail;
+          if (host.__sig !== sig) {
+            host.innerHTML = items.map(([tag, at, tx]) => `<${tag} ${at.map(([k, v]) => `${k}="${v}"`).join(' ')}${tx ? `>${tx}</${tag}>` : '/>'}`).join('') + tail;
+            host.__sig = sig;
+            return;
+          }
+          const kids = host.children;
+          items.forEach(([, at], i) => { const n = kids[i]; at.forEach(([k, v]) => { if (n.getAttribute(k) !== v) n.setAttribute(k, v); }); });
+        }
         function render(full) {
           const grow = (b) => K.clamp((st.t - b) / 0.45, 0, 1);
-          let h = '';
+          const items = [];
           st.nodes.forEach((q) => {
             if (q.p < 0) return;
             const P = st.nodes[q.p], g = K.easeOut(grow(q.born));
             const x2 = P.x + (q.x - P.x) * g, y2 = P.y + (q.y - P.y) * g;
-            h += `<path d="M${P.x.toFixed(1)},${P.y.toFixed(1)} Q${((P.x + x2) / 2 + 6).toFixed(1)},${((P.y + y2) / 2).toFixed(1)} ${x2.toFixed(1)},${y2.toFixed(1)}" style="fill:none;stroke:var(--ink-2);stroke-width:${st.R > 60 ? 1.6 : 2.4}"/>`;
+            items.push(['path', [['d', `M${P.x.toFixed(1)},${P.y.toFixed(1)} Q${((P.x + x2) / 2 + 6).toFixed(1)},${((P.y + y2) / 2).toFixed(1)} ${x2.toFixed(1)},${y2.toFixed(1)}`], ['style', `fill:none;stroke:var(--ink-2);stroke-width:${st.R > 60 ? 1.6 : 2.4}`]]]);
           });
           st.links.forEach((l) => {
             const A = st.nodes[l.a], B = st.nodes[l.b], g = grow(l.born);
             if (g <= 0) return;
             const mx = (A.x + B.x) / 2, my = Math.min(A.y, B.y) - 40;
-            h += `<path d="M${A.x.toFixed(1)},${A.y.toFixed(1)} Q${mx.toFixed(1)},${my.toFixed(1)} ${B.x.toFixed(1)},${B.y.toFixed(1)}" style="fill:none;stroke:var(--bad);stroke-width:2;stroke-dasharray:6 6;opacity:${(0.75 * g).toFixed(2)}"/>`;
+            items.push(['path', [['d', `M${A.x.toFixed(1)},${A.y.toFixed(1)} Q${mx.toFixed(1)},${my.toFixed(1)} ${B.x.toFixed(1)},${B.y.toFixed(1)}`], ['style', `fill:none;stroke:var(--bad);stroke-width:2;stroke-dasharray:6 6;opacity:${(0.75 * g).toFixed(2)}`]]]);
           });
           const rr = st.R > 60 ? 5 : st.R > 25 ? 7 : 9;
           st.nodes.forEach((q, i) => {
             if (i === 0) return;
             const g = grow(q.born), r = rr * (0.3 + 0.7 * K.easeOut(g)) * (g < 1 ? 1 + 0.5 * Math.sin(g * Math.PI) : 1);
-            if (q.exc) h += `<circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="${r.toFixed(1)}" style="fill:var(--paper);stroke:var(--bad);stroke-width:2.5;stroke-dasharray:3 2"/>`;
-            else h += `<circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="${r.toFixed(1)}" style="fill:var(--paper);stroke:var(--ink);stroke-width:2.5"/>`;
+            items.push(['circle', [['cx', q.x.toFixed(1)], ['cy', q.y.toFixed(1)], ['r', r.toFixed(1)], ['style', q.exc ? 'fill:var(--paper);stroke:var(--bad);stroke-width:2.5;stroke-dasharray:3 2' : 'fill:var(--paper);stroke:var(--ink);stroke-width:2.5']]]);
           });
-          h += `<rect x="370" y="6" width="140" height="40" rx="6" style="fill:var(--ink)"/><text x="440" y="34" text-anchor="middle" style="font-family:var(--font-body);font-weight:600;font-size:21px;fill:var(--paper)">주문서 입력</text>`;
-          h += `<g transform="translate(598,32)"><circle cx="0" cy="-6" r="7" style="fill:var(--paper);stroke:var(--ink);stroke-width:2.5"/><text x="14" y="0" style="font-family:var(--font-mono);font-size:20px;fill:var(--ink-2)">규칙</text><circle cx="92" cy="-6" r="7" style="fill:var(--paper);stroke:var(--bad);stroke-width:2.5;stroke-dasharray:3 2"/><text x="106" y="0" style="font-family:var(--font-mono);font-size:20px;fill:var(--bad)">예외</text><path d="M170,-6 h34" style="stroke:var(--bad);stroke-width:2;stroke-dasharray:6 6"/><text x="210" y="0" style="font-family:var(--font-mono);font-size:20px;fill:var(--bad)">얽힘</text></g>`;
-          svg.innerHTML = h;
+          patch(svg, items, LEGEND);
           // gauge
           const c = st.shown, col = c > 0.7 ? 'var(--bad)' : c > 0.4 ? 'var(--c4)' : 'var(--good)';
-          let gh = `<rect x="0" y="1" width="700" height="36" style="fill:var(--paper-2);stroke:var(--ink);stroke-width:2.5"/>`;
-          gh += `<rect x="2" y="3" width="${(696 * c).toFixed(1)}" height="32" style="fill:${col}"/>`;
-          for (let i = 1; i < 10; i++) gh += `<line x1="${i * 70}" y1="1" x2="${i * 70}" y2="${i % 5 ? 7 : 12}" style="stroke:var(--ink);stroke-width:2"/>`;
-          if (c > 0.82) gh += `<text x="${Math.min(690, 696 * c) - 8}" y="29" text-anchor="end" style="font-family:var(--font-hand);font-size:28px;fill:var(--paper)">아무도 전체를 모른다</text>`;
-          gauge.innerHTML = gh;
+          const gi = [['rect', [['x', '0'], ['y', '1'], ['width', '700'], ['height', '36'], ['style', 'fill:var(--paper-2);stroke:var(--ink);stroke-width:2.5']]]];
+          gi.push(['rect', [['x', '2'], ['y', '3'], ['width', (696 * c).toFixed(1)], ['height', '32'], ['style', `fill:${col}`]]]);
+          for (let i = 1; i < 10; i++) gi.push(['line', [['x1', String(i * 70)], ['y1', '1'], ['x2', String(i * 70)], ['y2', String(i % 5 ? 7 : 12)], ['style', 'stroke:var(--ink);stroke-width:2']]]);
+          if (c > 0.82) gi.push(['text', [['x', String(Math.min(690, 696 * c) - 8)], ['y', '29'], ['text-anchor', 'end'], ['style', 'font-family:var(--font-hand);font-size:28px;fill:var(--paper)']], '아무도 전체를 모른다']);
+          patch(gauge, gi, '');
           if (full !== false) {
             cnt.innerHTML = `규칙 <b>${st.R}</b>개 · 예외 <b class="bad">${st.E}</b>개 · 얽힘 <b class="bad">${st.links.length}</b>곳`;
             // long rules wrap (hanging indent); older lines drop off the top until the newest ones fit whole
@@ -1121,10 +1148,22 @@
           fwd: [edges1.map(([a, j]) => [P.i[a], P.h[j]]), edges2.map(([j]) => [P.h[j], P.o[0]])],
           bwd: [edges2.map(([j]) => [P.o[0], P.h[j]]), edges1.map(([a, j]) => [P.h[j], P.i[a]])],
         };
+        // runs every frame of a pulse: move the existing dots instead of re-parsing them (same markup when rebuilt)
+        let pulseKey = '';
         const drawPulses = () => {
-          if (!anim) { pulses.innerHTML = ''; return; }
+          if (!anim) { pulses.innerHTML = ''; pulseKey = ''; return; }
           const t = K.ease(K.clamp(anim.t, 0, 1)), col = anim.kind === 'bwd' ? 'var(--pen)' : 'var(--ink)';
-          pulses.innerHTML = PAIRS[anim.kind][anim.ph].map(([A, B]) => `<circle cx="${(A[0] + (B[0] - A[0]) * t).toFixed(1)}" cy="${(A[1] + (B[1] - A[1]) * t).toFixed(1)}" r="10" style="fill:${col};stroke:var(--paper);stroke-width:3"/>`).join('');
+          const pairs = PAIRS[anim.kind][anim.ph], key = col + pairs.length;
+          if (key !== pulseKey || pulses.children.length !== pairs.length) {
+            pulses.innerHTML = pairs.map(([A, B]) => `<circle cx="${(A[0] + (B[0] - A[0]) * t).toFixed(1)}" cy="${(A[1] + (B[1] - A[1]) * t).toFixed(1)}" r="10" style="fill:${col};stroke:var(--paper);stroke-width:3"/>`).join('');
+            pulseKey = key;
+            return;
+          }
+          pairs.forEach(([A, B], i) => {
+            const n = pulses.children[i], x = (A[0] + (B[0] - A[0]) * t).toFixed(1), y = (A[1] + (B[1] - A[1]) * t).toFixed(1);
+            if (n.getAttribute('cx') !== x) n.setAttribute('cx', x);
+            if (n.getAttribute('cy') !== y) n.setAttribute('cy', y);
+          });
         };
         const finish = () => {
           if (!anim) return;

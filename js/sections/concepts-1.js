@@ -764,6 +764,8 @@
       init(el, K) {
         const W = 445, H = 360;
         const self = this;
+        // theme colours for the three draws: read once and refreshed on theme change, not three getComputedStyle calls a frame
+        let pal = K.colors();
         // photo caption: keep '알파고 대국 2016' whole (no ellipsis) even in a wider fallback font
         const cap = el.querySelector('.photo figcaption');
         if (cap) { const fitCap = () => shrinkToFit([cap, ...cap.querySelectorAll('small')], () => cap.scrollWidth > cap.clientWidth + 1, 0.6); fitCap(); K.onTheme(fitCap); }
@@ -816,7 +818,7 @@
           return out;
         };
         const drawSup = () => {
-          const C = K.colors(), ctx = A.ctx;
+          const C = pal, ctx = A.ctx;
           ctx.clearRect(0, 0, W, H);
           const rect = [[6, 6], [W - 6, 6], [W - 6, H - 6], [6, H - 6]];
           const g = (q) => f(sup.w, { x: q[0], y: q[1] });
@@ -873,7 +875,7 @@
           return moved;
         };
         const drawUns = () => {
-          const C = K.colors(), ctx = B.ctx, CL = clusterColors(C);
+          const C = pal, ctx = B.ctx, CL = clusterColors(C);
           ctx.clearRect(0, 0, W, H);
           sketchFrame(ctx, W, H, C, 33);
           for (const p of unsPts) {
@@ -900,9 +902,9 @@
         const CS = 52, OX = (W - GW * CS) / 2, OY = (H - GH * CS) / 2 + 6;   // room for the tag above and the ‘출발’ label below
         const isEnd = (x, y) => (x === GOAL[0] && y === GOAL[1]) || (x === TRAP[0] && y === TRAP[1]);
         const key = (x, y) => x + ',' + y;
-        const rl = { Q: null, M: null, s: START.slice(), ep: 1, len: 0, trail: [], acc: 0, pause: 0, streak: 0, hold: 0, last: '', lastLen: 0 };
+        const rl = { Q: null, M: null, mem: null, s: START.slice(), ep: 1, len: 0, trail: [], acc: 0, pause: 0, streak: 0, hold: 0, last: '', lastLen: 0 };
         const rlReset = () => {
-          rl.Q = {}; rl.M = new Map(); rl.s = START.slice(); rl.ep = 1; rl.len = 0; rl.trail = [START.slice()]; rl.pause = 0; rl.streak = 0; rl.hold = 0; rl.last = '';
+          rl.Q = {}; rl.M = new Map(); rl.mem = []; rl.s = START.slice(); rl.ep = 1; rl.len = 0; rl.trail = [START.slice()]; rl.pause = 0; rl.streak = 0; rl.hold = 0; rl.last = '';
         };
         const q = (s) => rl.Q[key(s[0], s[1])] || (rl.Q[key(s[0], s[1])] = [0, 0, 0, 0]);
         const vOf = (x, y) => { const v = rl.Q[key(x, y)]; return v ? Math.max(...v) : 0; };
@@ -919,8 +921,11 @@
           const learn1 = (ps, pa, pn, pr, pe) => { const tg = pe ? pr : pr + 0.95 * Math.max(...q(pn)); const pv = q(ps); pv[pa] += 0.5 * (tg - pv[pa]); };
           learn1(s, a, [nx2, ny2], r, end);
           // replay 20 remembered moves (Dyna-Q) so the lesson spreads faster
-          rl.M.set(key(s[0], s[1]) + '|' + a, [s.slice(), a, [nx2, ny2], r, end]);
-          const mem = Array.from(rl.M.values());
+          // rl.mem holds the remembered moves in first-seen order, latest outcome kept (what Array.from(map.values())
+          // gave), without copying the whole memory on every step; rl.M maps a move to its slot
+          const mk = key(s[0], s[1]) + '|' + a, mv = [s.slice(), a, [nx2, ny2], r, end], slot = rl.M.get(mk);
+          if (slot == null) { rl.M.set(mk, rl.mem.length); rl.mem.push(mv); } else rl.mem[slot] = mv;
+          const mem = rl.mem;
           for (let k = 0; k < 20; k++) learn1(...mem[Math.floor(rnd() * mem.length)]);
           rl.s = [nx2, ny2]; rl.len++;
           if (!end && rl.len >= 150) end = 'timeout';
@@ -940,7 +945,7 @@
         };
         const cellC = (x, y) => [OX + x * CS + CS / 2, OY + y * CS + CS / 2];
         const drawRL = (final) => {
-          const C = K.colors(), ctx = Cn.ctx;
+          const C = pal, ctx = Cn.ctx;
           ctx.clearRect(0, 0, W, H);
           sketchFrame(ctx, W, H, C, 45);
           for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
@@ -1021,10 +1026,11 @@
         const drawAll = (finalRL) => { drawSup(); drawUns(); drawRL(finalRL); };
         finalStates();
         drawAll(true);
-        K.onTheme(() => drawAll(self._live ? false : true));
+        K.onTheme(() => { pal = K.colors(); drawAll(self._live ? false : true); });
 
         self._start = () => {
           self._live = true;
+          pal = K.colors();
           supReset();
           unsReset();
           rlReset();
@@ -1032,26 +1038,31 @@
         };
         self._stop = () => { self._live = false; finalStates(); drawAll(true); };
 
+        /* Each panel is redrawn only on frames where something it shows changed (holds, pauses and the grey /
+           done phases are still images); an untouched canvas also costs nothing to hand to the compositor. */
         const rndRL = K.rand(99);
         K.loop(el, (t, dt) => {
           if (!self._live) return;
-          /* (a) */
-          if (sup.hold > 0) { sup.hold -= dt; if (sup.hold <= 0) supReset(); }
+          /* (a) drawSup shows sup.w only */
+          let dSup = false;
+          if (sup.hold > 0) { sup.hold -= dt; if (sup.hold <= 0) { supReset(); dSup = true; } }
           else {
             sup.t += dt;
-            if (sup.t > 0.6) supGD(Math.min(0.12, 2.4 * dt));
+            if (sup.t > 0.6) { supGD(Math.min(0.12, 2.4 * dt)); dSup = true; }
             if ((sup.t > 3.5 && !wrongOf(sup.w).length) || sup.t > 8) sup.hold = 2.6;
           }
-          drawSup();
-          /* (b) */
+          if (dSup) drawSup();
+          /* (b) drawUns shows the points' groups, phase, step and the centroids, which glide while uns.anim < 1 */
+          let dUns = uns.anim < 1;
           uns.t += dt; uns.anim += dt / 0.45;
-          if (uns.phase === 'grey' && uns.t > 1.3) { uns.phase = 'run'; uns.t = 0; }
-          else if (uns.phase === 'run' && uns.t > 0.75) { uns.t = 0; const m = unsIter(); if (m < 0.3) uns.phase = 'done'; }
-          else if (uns.phase === 'done' && uns.t > 2.8) unsReset();
-          drawUns();
-          /* (c) */
-          if (rl.hold > 0) { rl.hold -= dt; if (rl.hold <= 0) rlReset(); }
-          else if (rl.pause > 0) { rl.pause -= dt; if (rl.pause <= 0) { rl.s = START.slice(); rl.len = 0; rl.trail = [START.slice()]; rl.ep++; } }
+          if (uns.phase === 'grey' && uns.t > 1.3) { uns.phase = 'run'; uns.t = 0; dUns = true; }
+          else if (uns.phase === 'run' && uns.t > 0.75) { uns.t = 0; const m = unsIter(); if (m < 0.3) uns.phase = 'done'; dUns = true; }
+          else if (uns.phase === 'done' && uns.t > 2.8) { unsReset(); dUns = true; }
+          if (dUns) drawUns();
+          /* (c) drawRL shows the agent, trail, values and tag: they change only on a step, a pause's end or a reset */
+          let dRL = false;
+          if (rl.hold > 0) { rl.hold -= dt; if (rl.hold <= 0) { rlReset(); dRL = true; } }
+          else if (rl.pause > 0) { rl.pause -= dt; if (rl.pause <= 0) { rl.s = START.slice(); rl.len = 0; rl.trail = [START.slice()]; rl.ep++; dRL = true; } }
           else {
             rl.acc += dt;
             const sps = rl.len > 22 ? 40 : 11; // fast-forward while wandering, slow down once it walks with purpose
@@ -1059,6 +1070,7 @@
               rl.acc -= 1 / sps;
               const end = rlStep(rndRL, epsOf(rl.ep));
               rl.trail.push(rl.s.slice());
+              dRL = true;
               if (end) {
                 rl.last = end === 'goal' ? '+1 도착' : end === 'trap' ? '함정! −1' : '시간 초과';
                 rl.lastLen = rl.len;
@@ -1068,7 +1080,7 @@
               }
             }
           }
-          drawRL(false);
+          if (dRL) drawRL(false);
         });
       },
       enter() { if (this._start) this._start(); },

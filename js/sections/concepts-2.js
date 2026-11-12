@@ -22,6 +22,21 @@
   const MINUS = '−';
   const sgn = (v, d) => (v < -0.5 * Math.pow(10, -d) ? MINUS : '') + Math.abs(v).toFixed(d);
   const onFonts = (fn) => { try { if (document.fonts && document.fonts.ready) document.fonts.ready.then(fn); } catch (e) { /* ignore */ } };
+  // Same job as onFonts for a demo whose redraw is also its Kit.onTheme handler (the engine re-runs those once the
+  // startup fonts are in). A canvas draw that needs a font face still loading flips document.fonts.status to
+  // 'loading' synchronously, so when nothing is loading right after the init draw that draw is already final (a redraw
+  // would be identical, and reading document.fonts.ready would force a style + layout pass). `isFinal()` skips the
+  // redraw when the theme handler already redrew with no font load in flight.
+  const fontsIdle = () => { try { return document.fonts.status !== 'loading'; } catch (e) { return false; } };
+  const afterFonts = (fn, isFinal) => {
+    try {
+      if (!document.fonts || fontsIdle()) return; // status first: touching .ready is what forces the layout
+      const r = document.fonts.ready;
+      if (r) r.then(() => { if (!isFinal()) fn(); });
+    } catch (e) { /* ignore */ }
+  };
+  // Chrome replaces the text node even when the new text is identical (style recalc + layout), so skip such writes.
+  const setText = (n, s) => { s = String(s); if (n.textContent !== s) n.textContent = s; };
   function line(ctx, x1, y1, x2, y2) { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); }
   function arrow(ctx, x1, y1, x2, y2, head) {
     head = head || 12;
@@ -387,51 +402,54 @@
             }
           });
         }
+        let fHtml = null; // last markup written to .nr-f (only sync() writes it)
+        const setAttr = (n, k, v) => { if (n.getAttribute(k) !== v) n.setAttribute(k, v); };
         function sync() {
           const study = S.mode === 'study', P = pts();
-          $('.nr-ow1').textContent = sgn(S.w1, 2);
-          $('.nr-ow2').textContent = sgn(S.w2, 2);
-          $('.nr-ob').textContent = sgn(S.b, 1);
+          setText($('.nr-ow1'), sgn(S.w1, 2));
+          setText($('.nr-ow2'), sgn(S.w2, 2));
+          setText($('.nr-ob'), sgn(S.b, 1));
           let c = 0; P.forEach((p) => { if (pred(p) === p.t) c++; });
-          $('.nr-pct').textContent = Math.round((100 * c) / P.length) + '%';
-          $('.nr-cnt').textContent = `${c} / ${P.length} 맞음`;
+          setText($('.nr-pct'), Math.round((100 * c) / P.length) + '%');
+          setText($('.nr-cnt'), `${c} / ${P.length} 맞음`);
           const i = S.hov >= 0 ? S.hov : S.sel, p = P[i] || P[0], z = zOf(p), o = pred(p);
           const fx = (v) => (study ? v.toFixed(1) : String(v));
-          $('.nr-l1').textContent = study ? '공부' : 'x₁';
-          $('.nr-l2').textContent = study ? '수면' : 'x₂';
-          $('.nr-x1').textContent = fx(p.x);
-          $('.nr-x2').textContent = fx(p.y);
-          $('.nr-tw1').textContent = '× ' + sgn(S.w1, 2);
-          $('.nr-tw2').textContent = '× ' + sgn(S.w2, 2);
-          $('.nr-tb').textContent = (S.b < 0 ? '+ b (' + sgn(S.b, 1) + ')' : '+ b (' + S.b.toFixed(1) + ')');
+          setText($('.nr-l1'), study ? '공부' : 'x₁');
+          setText($('.nr-l2'), study ? '수면' : 'x₂');
+          setText($('.nr-x1'), fx(p.x));
+          setText($('.nr-x2'), fx(p.y));
+          setText($('.nr-tw1'), '× ' + sgn(S.w1, 2));
+          setText($('.nr-tw2'), '× ' + sgn(S.w2, 2));
+          setText($('.nr-tb'), (S.b < 0 ? '+ b (' + sgn(S.b, 1) + ')' : '+ b (' + S.b.toFixed(1) + ')'));
           // the sum must fit inside the Σ circle: "= −46.20" is wider than the chord at 24px, so shrink it (never below 20px)
           const zt = $('.nr-z'), zs = '= ' + sgn(z, 2);
-          zt.textContent = zs; zt.style.fontSize = '';
+          zt.textContent = zs; zt.style.fontSize = ''; // always a fresh text node: the width below is measured anew
           let zw = 0;
           try { zw = zt.getComputedTextLength(); } catch (e) { /* not laid out yet */ }
           if (!(zw > 0)) zw = zs.length * 0.6 * 24;
           if (zw > 100) zt.style.fontSize = Math.max(20, Math.floor((2400 / zw) * 10) / 10) + 'px';
-          $('.nr-o').textContent = String(o);
+          setText($('.nr-o'), String(o));
           $('.nr-on').classList.toggle('on', o === 1);
           const ol = $('.nr-ol');
-          ol.textContent = study ? (o ? '합격' : '불합격') : S.mode.toUpperCase();
-          ol.setAttribute('class', 'ol nr-ol ' + (o === p.t ? 'good' : 'bad'));
+          setText(ol, study ? (o ? '합격' : '불합격') : S.mode.toUpperCase());
+          setAttr(ol, 'class', 'ol nr-ol ' + (o === p.t ? 'good' : 'bad'));
           [['.nr-e1', S.w1], ['.nr-e2', S.w2]].forEach(([s, w]) => {
             const e = $(s);
-            e.setAttribute('stroke-width', (2 + 2.6 * Math.abs(w)).toFixed(1));
-            e.setAttribute('stroke-dasharray', w < 0 ? '10 7' : 'none');
+            setAttr(e, 'stroke-width', (2 + 2.6 * Math.abs(w)).toFixed(1));
+            setAttr(e, 'stroke-dasharray', w < 0 ? '10 7' : 'none');
           });
           const who = study ? `학생 ${i + 1}` : `(${p.x}, ${p.y})`;
           const lab = study ? (o ? '합격' : '불합격') : String(o);
           const truth = study ? (p.t ? '합격' : '불합격') : String(p.t);
           const w2s = S.w2 < -0.005 ? `(${sgn(S.w2, 2)})` : sgn(S.w2, 2);
-          $('.nr-f').innerHTML = `<div class="nr-f1"><span class="who">${who}</span><span>·</span><span>정답 ${truth}</span><span>·</span>` +
+          const fh = `<div class="nr-f1"><span class="who">${who}</span><span>·</span><span>정답 ${truth}</span><span>·</span>` +
             `<span class="ok ${o === p.t ? 'good' : 'bad'}">${o === p.t ? '예측 맞음' : '예측 틀림'}</span></div>` +
             `<div class="nr-f2">${sgn(S.w1, 2)}×${fx(p.x)} + ${w2s}×${fx(p.y)} ${S.b < 0 ? MINUS : '+'} ${Math.abs(S.b).toFixed(1)} = <b>${sgn(z, 2)}</b> → <b>${lab}</b></div>`;
-          $('.nr-lw1').textContent = study ? 'w₁ · 공부' : 'w₁';
-          $('.nr-lw2').textContent = study ? 'w₂ · 수면' : 'w₂';
-          $('.nr-g1').textContent = study ? '합격' : '정답 1';
-          $('.nr-g0').textContent = study ? '불합격' : '정답 0';
+          if (fh !== fHtml) { $('.nr-f').innerHTML = fh; fHtml = fh; }
+          setText($('.nr-lw1'), study ? 'w₁ · 공부' : 'w₁');
+          setText($('.nr-lw2'), study ? 'w₂ · 수면' : 'w₂');
+          setText($('.nr-g1'), study ? '합격' : '정답 1');
+          setText($('.nr-g0'), study ? '불합격' : '정답 0');
           draw();
         }
         function setMode(m) {
@@ -529,29 +547,32 @@
         for (let i = 0; i < 300; i++) S.hist.push(N.step(P, LRATE));
 
         const px = (x) => ((x + D) / (2 * D)) * HW, py = (y) => ((D - y) / (2 * D)) * HW;
-        function drawHeat() {
-          const C = Kit.colors(), ctx = heat.ctx;
-          const paper = rgb(C.paper), pen = rgb(C.pen), ink = rgb(C.ink);
-          const img = octx.createImageData(G + 1, G + 1), d = img.data;
+        // training redraws every frame: pixel buffers and the contour scratch are allocated once, and the theme
+        // colours are read once per redraw in all() (every pixel and channel is rewritten each time)
+        const himg = octx.createImageData(G + 1, G + 1), timg = tctx.createImageData(TN, TN);
+        const cs = HW / G, Q = new Float64Array(8);
+        let qn = 0;
+        const edge = (v1, v2, x1, y1, x2, y2) => { if ((v1 >= 0.5) !== (v2 >= 0.5)) { const t = (0.5 - v1) / (v2 - v1); Q[qn++] = (x1 + (x2 - x1) * t) * cs; Q[qn++] = (y1 + (y2 - y1) * t) * cs; } };
+        function drawHeat(C, paper, pen, ink) {
+          const ctx = heat.ctx, d = himg.data;
           for (let j = 0; j <= G; j++) for (let i = 0; i <= G; i++) {
             const x = -D + (2 * D * i) / G, y = D - (2 * D * j) / G, p = N.fwd(x, y), k = j * (G + 1) + i;
             V[k] = p;
-            const c = p >= 0.5 ? mix(paper, pen, (p - 0.5) * 2 * 0.45) : mix(paper, ink, (0.5 - p) * 2 * 0.2);
-            d[4 * k] = c[0]; d[4 * k + 1] = c[1]; d[4 * k + 2] = c[2]; d[4 * k + 3] = 255;
+            let q, t; // same arithmetic as mix(paper, q, t)
+            if (p >= 0.5) { q = pen; t = (p - 0.5) * 2 * 0.45; } else { q = ink; t = (0.5 - p) * 2 * 0.2; }
+            d[4 * k] = paper[0] + (q[0] - paper[0]) * t; d[4 * k + 1] = paper[1] + (q[1] - paper[1]) * t; d[4 * k + 2] = paper[2] + (q[2] - paper[2]) * t; d[4 * k + 3] = 255;
           }
-          octx.putImageData(img, 0, 0);
+          octx.putImageData(himg, 0, 0);
           ctx.imageSmoothingEnabled = true;
           ctx.drawImage(off, 0, 0, HW, HW);
-          // 0.5 contour (marching squares)
-          const cs = HW / G;
+          // 0.5 contour (marching squares): crossings in the order top, right, bottom, left, joined in pairs
           ctx.strokeStyle = C.ink; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
           ctx.beginPath();
           for (let j = 0; j < G; j++) for (let i = 0; i < G; i++) {
             const a = V[j * (G + 1) + i], b = V[j * (G + 1) + i + 1], c = V[(j + 1) * (G + 1) + i + 1], e = V[(j + 1) * (G + 1) + i];
-            const q = [];
-            const edge = (v1, v2, x1, y1, x2, y2) => { if ((v1 >= 0.5) !== (v2 >= 0.5)) { const t = (0.5 - v1) / (v2 - v1); q.push([(x1 + (x2 - x1) * t) * cs, (y1 + (y2 - y1) * t) * cs]); } };
+            qn = 0;
             edge(a, b, i, j, i + 1, j); edge(b, c, i + 1, j, i + 1, j + 1); edge(e, c, i, j + 1, i + 1, j + 1); edge(a, e, i, j, i, j + 1);
-            for (let k = 0; k + 1 < q.length; k += 2) { ctx.moveTo(q[k][0], q[k][1]); ctx.lineTo(q[k + 1][0], q[k + 1][1]); }
+            for (let k = 0; k + 3 < qn; k += 4) { ctx.moveTo(Q[k], Q[k + 1]); ctx.lineTo(Q[k + 2], Q[k + 3]); }
           }
           ctx.stroke();
           for (const p of P) {
@@ -559,18 +580,17 @@
             if (p[2]) { ctx.fillStyle = C.pen; ctx.fill(); ctx.strokeStyle = C.paper; ctx.lineWidth = 1.5; ctx.stroke(); } else { ctx.fillStyle = C.paper; ctx.fill(); ctx.strokeStyle = C.ink; ctx.lineWidth = 2.5; ctx.stroke(); }
           }
         }
-        function thumb(j) {
-          const C = Kit.colors(), paper = rgb(C.paper), pen = rgb(C.pen), ink = rgb(C.ink);
-          const img = tctx.createImageData(TN, TN), d = img.data, w = N.W1[j], b = N.b1[j];
+        function thumb(j, paper, pen, ink) {
+          const d = timg.data, w = N.W1[j], b = N.b1[j];
           for (let y = 0; y < TN; y++) for (let x = 0; x < TN; x++) {
             const a = Math.tanh(w[0] * (-D + (2 * D * (x + 0.5)) / TN) + w[1] * (D - (2 * D * (y + 0.5)) / TN) + b);
             const c = a > 0 ? mix(paper, pen, a * 0.75) : mix(paper, ink, -a * 0.45), k = 4 * (y * TN + x);
             d[k] = c[0]; d[k + 1] = c[1]; d[k + 2] = c[2]; d[k + 3] = 255;
           }
-          tctx.putImageData(img, 0, 0);
+          tctx.putImageData(timg, 0, 0);
         }
-        function drawNet() {
-          const C = Kit.colors(), ctx = netc.ctx, H = N.H;
+        function drawNet(C, paper, pen, ink) {
+          const ctx = netc.ctx, H = N.H;
           ctx.clearRect(0, 0, NW, NH);
           // more than 8 hidden neurons: two staggered columns so each thumbnail stays readable
           const top = 44, bot = NH - 6, zig = H > 8, gap = (bot - top) / (zig ? H + 1 : H);
@@ -596,7 +616,7 @@
           ctx.globalAlpha = 1;
           ctx.imageSmoothingEnabled = true;
           for (let j = 0; j < H; j++) {
-            thumb(j);
+            thumb(j, paper, pen, ink);
             ctx.drawImage(toff, hx(j) - s / 2, hy(j) - s / 2, s, s);
             ctx.strokeStyle = C.ink; ctx.lineWidth = 2; ctx.strokeRect(hx(j) - s / 2, hy(j) - s / 2, s, s);
           }
@@ -610,8 +630,8 @@
           ctx.font = `21px ${C.fontBody}`; ctx.fillStyle = C.ink2; ctx.textBaseline = 'alphabetic';
           ctx.fillText('입력', xi, 24); ctx.fillText(`은닉층 · 뉴런 ${H}개`, xh, 24); ctx.fillText('출력', xo, 24);
         }
-        function drawSpark() {
-          const C = Kit.colors(), ctx = spark.ctx, h = S.hist;
+        function drawSpark(C) {
+          const ctx = spark.ctx, h = S.hist;
           ctx.clearRect(0, 0, SPW, SPH);
           ctx.strokeStyle = C.ink3; ctx.lineWidth = 2;
           line(ctx, 1, SPH - 2, SPW, SPH - 2); line(ctx, 1, 2, 1, SPH - 2);
@@ -626,12 +646,16 @@
           }
           ctx.stroke();
         }
+        const epEl = $('.xn-ep'), lossEl = $('.xn-loss'), accEl = $('.xn-acc');
         function stats() {
-          $('.xn-ep').textContent = N.epoch.toLocaleString('ko-KR');
-          $('.xn-loss').textContent = (S.hist[S.hist.length - 1] || 0).toFixed(3);
-          $('.xn-acc').textContent = Math.round(N.acc(P) * 100) + '%';
+          setText(epEl, N.epoch.toLocaleString('ko-KR'));
+          setText(lossEl, (S.hist[S.hist.length - 1] || 0).toFixed(3));
+          setText(accEl, Math.round(N.acc(P) * 100) + '%');
         }
-        function all() { drawHeat(); drawNet(); drawSpark(); stats(); }
+        function all() {
+          const C = Kit.colors(), paper = rgb(C.paper), pen = rgb(C.pen), ink = rgb(C.ink);
+          drawHeat(C, paper, pen, ink); drawNet(C, paper, pen, ink); drawSpark(C); stats();
+        }
         const runBtn = $('.xn-run');
         function setRun(on) { S.run = on; runBtn.textContent = on ? '정지' : '학습 시작'; runBtn.classList.toggle('on', on); }
         function reset(autoRun) { N = new Net(S.H, S.seed); S.hist = []; setRun(autoRun); all(); }
@@ -655,8 +679,9 @@
           all();
         });
         all();
-        K.onTheme(all);
-        onFonts(all);
+        let fontsFinal = false;
+        K.onTheme(() => { all(); fontsFinal = fontsIdle(); });
+        afterFonts(all, () => fontsFinal);
       },
     },
 
@@ -694,7 +719,7 @@
   <div class="btns" style="flex-wrap:nowrap"><button class="btn gd-one">한 걸음</button><button class="btn gd-auto">자동</button><button class="btn ghost gd-again">다시</button></div>
 </div>
 <div class="src">출처: 경사하강법은 보통 A. Cauchy의 1847년 제안을 시초로 봄 · 곡선은 설명용 예시 함수 (실제 AI의 손실 곡면은 가중치 수만큼의 차원)</div>`,
-      init(el, K) {
+      init(el, K, f) {
         const $ = (s) => el.querySelector(s);
         const W = 1416, H = 400, U0 = -1.62, U1 = 1.62;
         const cv = K.canvas($('.gd-plot'), W, H);
@@ -729,9 +754,22 @@
           const lift = 26 + Math.abs(bx - ax) * 0.28;
           return { ax, ay, bx, by, cx: (ax + bx) / 2, cy: Math.min(ay, by) - lift };
         }
-        function draw() {
-          const C = Kit.colors(), ctx = cv.ctx;
+        // The mountain, its hatching, the valley labels and the axes never change, but while a hop or auto-play runs
+        // the canvas is redrawn every frame. During those frames they come from a cache canvas of the same backing
+        // size, copied in 1:1, and only the trail, labels and ball are drawn on top. Every other draw (rest states,
+        // theme/font changes, the end of a run, leaving the frame mid-hop) draws everything directly, exactly as
+        // before, so the canvas at rest holds the same pixels on every rasteriser (on a GPU canvas the cached frames
+        // can differ by a pixel of edge anti-aliasing).
+        // The cache sits in the document (display:none) because canvas text takes lang and font smoothing from its
+        // element; it is drawn into directly, never read back from the visible canvas.
+        const bg = document.createElement('canvas'); bg.width = cv.cv.width; bg.height = cv.cv.height;
+        bg.style.display = 'none'; cv.cv.after(bg);
+        const bgx = bg.getContext('2d');
+        let bgOk = false;
+        function drawStatic(ctx, C) {
           ctx.clearRect(0, 0, W, H);
+          // round caps reach the hatch line ends: that is the state every earlier frame left on the visible context
+          ctx.lineCap = 'round'; ctx.lineJoin = 'round';
           // mountain: hatched ground under the curve
           const pts = [];
           for (let i = 0; i <= 240; i++) { const u = U0 + ((U1 - U0) * i) / 240; pts.push([X(u), Y(GDF(u))]); }
@@ -753,6 +791,17 @@
           ctx.fillStyle = C.ink2; ctx.font = `21px ${C.fontBody}`; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
           ctx.fillText('가로 = 가중치 값 →', W - 16, H - 12);
           axR = 38 + ctx.measureText(AXL).width;
+        }
+        function draw(fast = !!(S.hop || S.auto)) {
+          const C = Kit.colors(), ctx = cv.ctx;
+          if (!fast) drawStatic(ctx, C);
+          else {
+            if (!bgOk) { bgx.setTransform(cv.scale, 0, 0, cv.scale, 0, 0); drawStatic(bgx, C); bgOk = true; }
+            ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.imageSmoothingEnabled = false;
+            ctx.clearRect(0, 0, bg.width, bg.height); ctx.drawImage(bg, 0, 0);
+            ctx.restore();
+            ctx.lineJoin = 'round'; ctx.lineCap = 'round'; // as the mountain curve leaves them when drawn here
+          }
           // hop arcs + footprints
           const T = S.trail, nShow = S.hop ? T.length - 1 : T.length;
           ctx.save(); ctx.setLineDash([7, 6]); ctx.strokeStyle = C.pen; ctx.lineWidth = 2.2; ctx.globalAlpha = 0.75;
@@ -814,7 +863,7 @@
           dot(ctx, bx, by, 15); ctx.fillStyle = C.hl; ctx.fill(); ctx.strokeStyle = C.ink; ctx.lineWidth = 3; ctx.stroke();
         }
         function ui() {
-          $('.gd-lro').textContent = S.lr.toFixed(2);
+          setText($('.gd-lro'), S.lr.toFixed(2));
           const v = +$('.gd-lr').value, z = v < 32 ? 0 : v <= 80 ? 1 : 2;
           el.querySelectorAll('.gd-zone span').forEach((s, i) => s.classList.toggle('on', i === z));
           const n = S.trail.length - 1;
@@ -826,11 +875,11 @@
             bounce: '계속 튕기기만 해요',
             tired: `${n}걸음째… 너무 느려요`,
           };
-          $('.gd-msg').textContent = S.done ? M[S.done] : n === 0 ? '준비: 한 걸음 또는 자동' : `${n}걸음째 내려가는 중`;
+          setText($('.gd-msg'), S.done ? M[S.done] : n === 0 ? '준비: 한 걸음 또는 자동' : `${n}걸음째 내려가는 중`);
           const u = Kit.clamp(S.u, -1.62, 1.62);
-          $('.gd-read').textContent = `걸음 ${n} · 손실 ${Math.abs(S.u) > 1.62 ? '—' : GDF(u).toFixed(3)} · 기울기 ${Math.abs(S.u) > 1.62 ? '—' : sgn(GDD(u), 2)}`;
+          setText($('.gd-read'), `걸음 ${n} · 손실 ${Math.abs(S.u) > 1.62 ? '—' : GDF(u).toFixed(3)} · 기울기 ${Math.abs(S.u) > 1.62 ? '—' : sgn(GDD(u), 2)}`);
           const ab = $('.gd-auto');
-          ab.textContent = S.auto ? '멈춤' : '자동';
+          setText(ab, S.auto ? '멈춤' : '자동');
           ab.classList.toggle('on', S.auto);
         }
         function render() { ui(); draw(); } // ui first: draw() reads the message box size
@@ -855,11 +904,14 @@
           if (S.auto && !S.done) {
             S.wait -= dt;
             if (S.wait <= 0) { step(!slow()); S.wait = slow() ? 0.04 : 0.2; render(); }
-          } else if (S.auto && S.done) { S.auto = false; ui(); }
+          } else if (S.auto && S.done) { S.auto = false; ui(); draw(false); } // the finished walk, drawn in full
         });
         render();
-        K.onTheme(draw);
-        onFonts(draw);
+        let fontsFinal = false;
+        const redraw = () => { bgOk = false; draw(false); };
+        f.leave = () => { if (S.hop || S.auto) draw(false); }; // a walk frozen mid-hop stays drawn in full
+        K.onTheme(() => { redraw(); fontsFinal = fontsIdle(); });
+        afterFonts(redraw, () => fontsFinal);
       },
     },
 
@@ -904,13 +956,13 @@
         const gcv = K.canvas($('.px-grid'), GW, GW);
         const ncv = K.canvas($('.px-num'), MW, GW);
         const Gd = new Uint8Array(NC * NC);
-        let hov = -1, last = null, painting = false;
+        let hov = -1, last = null, painting = false, inked = false; // inked: dab() changed a cell since the last check
         function dab(gx, gy) {
           for (let j = Math.floor(gy - 2); j <= Math.ceil(gy + 2); j++) for (let i = Math.floor(gx - 2); i <= Math.ceil(gx + 2); i++) {
             if (i < 0 || j < 0 || i >= NC || j >= NC) continue;
             const d = Math.hypot(i + 0.5 - gx, j + 0.5 - gy);
             const v = Math.round(255 * Kit.clamp((1.55 - d) / 0.85, 0, 1));
-            if (v > Gd[j * NC + i]) Gd[j * NC + i] = v;
+            if (v > Gd[j * NC + i]) { Gd[j * NC + i] = v; inked = true; }
           }
         }
         function stroke(a, b) {
@@ -964,24 +1016,29 @@
           const q = Kit.pt(e, g); last = { x: q.x / CS, y: q.y / CS };
           dab(last.x, last.y); hov = cell(q, CS); draw();
         });
+        // draw() depends only on Gd and hov (and theme/fonts, which redraw on their own): moves that change neither
+        // would repaint and re-upload both canvases for nothing. This also fires while the pointer pans across the
+        // frame when it is not the current one.
         g.addEventListener('pointermove', (e) => {
-          const q = Kit.pt(e, g), p = { x: q.x / CS, y: q.y / CS };
-          hov = cell(q, CS);
-          if (painting && last) { stroke(last, p); last = p; }
-          draw();
+          const q = Kit.pt(e, g), p = { x: q.x / CS, y: q.y / CS }, h = cell(q, CS);
+          let ch = h !== hov;
+          hov = h;
+          if (painting && last) { inked = false; stroke(last, p); last = p; if (inked) ch = true; }
+          if (ch) draw();
         });
         const stop = () => { painting = false; last = null; };
         g.addEventListener('pointerup', stop);
         g.addEventListener('pointercancel', stop);
-        g.addEventListener('pointerleave', () => { if (!painting) { hov = -1; draw(); } });
-        ncv.cv.addEventListener('pointermove', (e) => { hov = cell(Kit.pt(e, ncv.cv), MCW); draw(); });
-        ncv.cv.addEventListener('pointerleave', (e) => { if (e.pointerType === 'touch') return; hov = -1; draw(); });
+        g.addEventListener('pointerleave', () => { if (!painting && hov !== -1) { hov = -1; draw(); } });
+        ncv.cv.addEventListener('pointermove', (e) => { const h = cell(Kit.pt(e, ncv.cv), MCW); if (h !== hov) { hov = h; draw(); } });
+        ncv.cv.addEventListener('pointerleave', (e) => { if (e.pointerType === 'touch') return; if (hov !== -1) { hov = -1; draw(); } });
         $('.px-clear').addEventListener('click', () => { Gd.fill(0); draw(); });
         $('.px-seven').addEventListener('click', () => { seven(); draw(); });
         seven();
         draw();
-        K.onTheme(draw);
-        onFonts(draw);
+        let fontsFinal = false;
+        K.onTheme(() => { draw(); fontsFinal = fontsIdle(); });
+        afterFonts(draw, () => fontsFinal);
       },
     },
 
@@ -1094,8 +1151,9 @@
         const s = $('.of-s');
         s.addEventListener('input', () => { deg = +s.value; sync(); });
         sync();
-        K.onTheme(() => { drawPlot(); drawMini(); });
-        onFonts(() => { drawPlot(); drawMini(); });
+        let fontsFinal = false;
+        K.onTheme(() => { drawPlot(); drawMini(); fontsFinal = fontsIdle(); });
+        afterFonts(() => { drawPlot(); drawMini(); }, () => fontsFinal);
       },
     },
 
@@ -1196,7 +1254,7 @@
           K.svg('path', { class: 'ar', d: K.sketchPath(pts, { wobble: 1.5, seed: 3 + k }), 'marker-end': 'url(#rc-ah)' }, arcs);
         }
         const run = svg.querySelector('.run'), cnt = el.querySelector('.rc-cnt'), err = el.querySelector('.rc-err');
-        let t = Math.PI, laps = 1;
+        let t = Math.PI, laps = 1, shownLaps = 0;
         const place = () => {
           const p = P(t);
           run.setAttribute('cx', p[0].toFixed(1)); run.setAttribute('cy', p[1].toFixed(1));
@@ -1206,8 +1264,12 @@
             d = Math.min(d, 2 * Math.PI - d);
             n.classList.toggle('on', d < 0.32);
           });
-          cnt.textContent = `${laps.toLocaleString('ko-KR')}바퀴째`;
-          err.textContent = `오차 ${(0.88 * Math.exp(-(laps - 1) / 5) + 0.02).toFixed(2)}`;
+          // the texts change once per lap; rewriting them every frame would relayout the label each frame
+          if (laps !== shownLaps) {
+            shownLaps = laps;
+            cnt.textContent = `${laps.toLocaleString('ko-KR')}바퀴째`;
+            err.textContent = `오차 ${(0.88 * Math.exp(-(laps - 1) / 5) + 0.02).toFixed(2)}`;
+          }
         };
         K.loop(el, (now, dt) => {
           const before = Math.floor((t - Math.PI) / (2 * Math.PI));

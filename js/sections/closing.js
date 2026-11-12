@@ -55,6 +55,30 @@
     try { w = t.getComputedTextLength(); } catch (e) { w = 0; }
     if (w > maxW) t.style.fontSize = Math.max(20, Math.floor((parseFloat(getComputedStyle(t).fontSize) * maxW) / w)) + 'px';
   };
+  // n+1 points spaced evenly by arc length along an "M x,y C … C …" path (the form sketchPath writes), read off a
+  // fine polyline of its cubics. They sit within ~0.01px of what getPointAtLength returns, but cost ~1ms instead of
+  // the ~100ms that n+1 getPointAtLength calls take (each call walks the whole path again).
+  const arcSamples = (d, n) => {
+    const v = (d.match(/-?\d+(?:\.\d+)?/g) || []).map(Number), SUB = 128;
+    const xs = [v[0]], ys = [v[1]], cum = [0];
+    for (let i = 2; i + 5 < v.length; i += 6) {
+      const x0 = xs[xs.length - 1], y0 = ys[ys.length - 1];
+      for (let k = 1; k <= SUB; k++) {
+        const t = k / SUB, u = 1 - t, a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, e = t * t * t;
+        const x = a * x0 + b * v[i] + c * v[i + 2] + e * v[i + 4], y = a * y0 + b * v[i + 1] + c * v[i + 3] + e * v[i + 5];
+        cum.push(cum[cum.length - 1] + Math.hypot(x - xs[xs.length - 1], y - ys[ys.length - 1])); xs.push(x); ys.push(y);
+      }
+    }
+    const L = cum[cum.length - 1], out = [];
+    for (let s = 0, j = 1; s <= n; s++) {
+      const at = (L * s) / n;
+      while (j < cum.length - 1 && cum[j] < at) j++;
+      const f = (at - cum[j - 1]) / (cum[j] - cum[j - 1] || 1);
+      out.push([xs[j - 1] + (xs[j] - xs[j - 1]) * f, ys[j - 1] + (ys[j] - ys[j - 1]) * f, s / n]);
+    }
+    out.len = L;
+    return out;
+  };
   const shortSubject = (s) => {
     s = String(s || '').trim();
     // drop parentheticals first, so "first working (point-contact) transistor" keeps its noun
@@ -240,10 +264,23 @@
         path.setAttribute('d', d); road.setAttribute('d', d);
         let L = 0;
         try { L = path.getTotalLength(); } catch (e) { L = 0; }
-        // where along the path each stop sits (nearest sample)
-        const samples = [];
-        if (L) for (let s = 0; s <= 400; s++) { const p = path.getPointAtLength((L * s) / 400); samples.push([p.x, p.y, s / 400]); }
-        const tAt = (x, y) => { let best = 1, bd = Infinity; for (const p of samples) { const dd = (p[0] - x) ** 2 + (p[1] - y) ** 2; if (dd < bd) { bd = dd; best = p[2]; } } return best; };
+        // where along the path each stop sits (nearest of 401 evenly spaced samples)
+        let samples = L ? arcSamples(d, 400) : [];
+        // not plain cubics after all (the lengths disagree): sample it the slow, exact way
+        if (samples.length && Math.abs(samples.len - L) > 1) {
+          samples = [];
+          for (let s = 0; s <= 400; s++) { const p = path.getPointAtLength((L * s) / 400); samples.push([p.x, p.y, s / 400]); }
+        }
+        const tAt = (x, y) => {
+          if (!samples.length) return 1;
+          const dist = samples.map((p) => Math.hypot(p[0] - x, p[1] - y)), m = Math.min.apply(null, dist);
+          const near = []; dist.forEach((v, s) => { if (v <= m + 0.5) near.push(s); });
+          if (near.length === 1) return samples[near[0]][2];
+          // a near-tie: settle it with the browser's own points, as a full getPointAtLength scan would
+          let best = 1, bd = Infinity;
+          near.forEach((s) => { const p = path.getPointAtLength((L * s) / 400); const dd = (p.x - x) ** 2 + (p.y - y) ** 2; if (dd < bd) { bd = dd; best = samples[s][2]; } });
+          return best;
+        };
         const gS = svg.querySelector('.ay-stops');
         const stops = STOPS.map(([i, yr, lab, side]) => {
           const [x, y] = PATH[i];
@@ -295,11 +332,15 @@
         const render = () => {
           const e = K.easeOut(st.p);
           if (L) {
-            [path, road].forEach((n) => { n.style.strokeDasharray = `${L} ${L}`; n.style.strokeDashoffset = String(L * (1 - e)); });
+            // fully drawn: drop the draw-in dash (same pixels, but a dashed stroke costs extra on every raster)
+            if (e >= 1) [path, road].forEach((n) => { n.style.strokeDasharray = ''; n.style.strokeDashoffset = ''; });
+            else [path, road].forEach((n) => { n.style.strokeDasharray = `${L} ${L}`; n.style.strokeDashoffset = String(L * (1 - e)); });
           }
           stops.forEach((s) => (s.g.style.opacity = e >= s.t - 0.004 ? 1 : 0));
-          clip.setAttribute('width', String(Math.max(0.01, clipW * K.easeOut(st.b))));
-          clip.setAttribute('x', String(clipX));
+          // only touch the clip when it moves: rewriting an unchanged value still repaints everything it clips
+          const cw = String(Math.max(0.01, clipW * K.easeOut(st.b)));
+          if (clip.getAttribute('width') !== cw) clip.setAttribute('width', cw);
+          if (clip.getAttribute('x') !== String(clipX)) clip.setAttribute('x', String(clipX));
         };
         f._ayRender = render;
         render();

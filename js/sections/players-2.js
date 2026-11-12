@@ -85,6 +85,68 @@
     }
     return d;
   }
+  /**
+   * JS twin of SVGPathElement.getTotalLength()/getPointAtLength() for our own absolute M/L/C paths.
+   * It repeats Blink's PathTraversalState step for step (cubics halved until the control polygon is
+   * within a relative 1e-8 of the chord, float32 math), so it returns the same points, but it walks
+   * the path once instead of twice per query and never forces a style/layout update.
+   */
+  function pathWalker(d) {
+    const F = Math.fround;
+    const dist = (ax, ay, bx, by) => F(Math.hypot(F(bx - ax), F(by - ay)));
+    const mid = (p, q) => F(p + q) / 2;
+    const sx = [], sy = [], ex = [], ey = [], cum = [], segEnd = [];   // flattened pieces, running length
+    const piece = (a, b, c, e, t) => { sx.push(a); sy.push(b); ex.push(c); ey.push(e); cum.push(t); segEnd.push(0); };
+    let T = 0, cx = 0, cy = 0, x0 = 0, y0 = 0;
+    const tok = d.match(/[MLC]|-?[\d.]+(?:e[-+]?\d+)?/g);
+    for (let i = 0; i < tok.length;) {
+      const cmd = tok[i++], num = () => F(+tok[i++]);
+      if (cmd === 'M') { cx = x0 = num(); cy = y0 = num(); continue; }
+      if (cmd === 'L') {
+        const x = num(), y = num();
+        T = F(T + dist(cx, cy, x, y)); piece(cx, cy, x, y, T); segEnd[segEnd.length - 1] = 1;
+        cx = x; cy = y; continue;
+      }
+      let q = [cx, cy, num(), num(), num(), num(), num(), num(), 0], acc = 0;
+      const ox = q[6], oy = q[7];
+      const sc = (q[0] * q[0] + q[1] * q[1] + (q[2] * q[2] + q[3] * q[3]) + (q[4] * q[4] + q[5] * q[5]) + (q[6] * q[6] + q[7] * q[7])) / 16;
+      if (sc >= 1e-16) {
+        const stack = [q];
+        do {
+          const [a, b, c1, c2, d1, d2, e1, e2, dep] = q;
+          const l = F(F(dist(a, b, c1, c2) + dist(c1, c2, d1, d2)) + dist(d1, d2, e1, e2));
+          const disc = F(l - dist(a, b, e1, e2));
+          if ((disc * disc) / sc > 1e-16 && dep < 20) {
+            const mx = mid(c1, d1), my = mid(c2, d2);
+            const l1x = mid(a, c1), l1y = mid(b, c2), l2x = mid(l1x, mx), l2y = mid(l1y, my);
+            const r2x = mid(d1, e1), r2y = mid(d2, e2), r1x = mid(r2x, mx), r1y = mid(r2y, my);
+            const kx = mid(l2x, r1x), ky = mid(l2y, r1y);
+            stack.push([kx, ky, r1x, r1y, r2x, r2y, e1, e2, dep + 1]);
+            q = [a, b, l1x, l1y, l2x, l2y, kx, ky, dep + 1];
+          } else {
+            acc = F(acc + l); piece(a, b, e1, e2, F(T + acc));
+            q = stack.pop();
+          }
+        } while (stack.length);
+        segEnd[segEnd.length - 1] = 1;
+      }
+      T = F(T + acc); cx = ox; cy = oy;
+    }
+    const total = T, n = cum.length;
+    return {
+      total,
+      at(s) {
+        let D = F(s);
+        if (!(D > 0)) return { x: x0, y: y0 };
+        if (D > total) D = total;
+        let lo = 0, hi = n - 1;
+        while (lo < hi) { const m = (lo + hi) >> 1; if (cum[m] >= D) hi = m; else lo = m + 1; }
+        while (cum[lo] === D && !segEnd[lo]) lo++;   // Blink needs '>' inside a segment, '>=' at its end
+        const off = F(D - cum[lo]), a = F(Math.atan2(F(ey[lo] - sy[lo]), F(ex[lo] - sx[lo])));
+        return { x: F(ex[lo] + F(off * F(Math.cos(a)))), y: F(ey[lo] + F(off * F(Math.sin(a)))) };
+      },
+    };
+  }
 
   Deck.part('players', 2, [
     /* ═════════════════════════ 1. Anthropic ═════════════════════════ */
@@ -171,7 +233,12 @@
         const anim = { on: false, t: 0 };
         const fixHead = '<span class="who">AI · <span class="tag">고친 답</span></span>';
 
+        let painted = '';
         function paint(k, critN, fixN) {
+          // the typing loop asks for the same text on most frames; repainting it rebuilt the DOM each time
+          const key = k + '|' + critN + '|' + fixN;
+          if (key === painted) return;
+          painted = key;
           const r = CAI.rules[k];
           rulesHost.querySelectorAll('.rule-btn').forEach((b) => b.classList.toggle('on', +b.dataset.r === k));
           draft.querySelectorAll('.seg').forEach((s) => s.classList.toggle('hit', +s.dataset.s === r.seg));
@@ -636,7 +703,8 @@
           const g = K.svg('g', { class: 's', 'data-i': i }, layerS);
           const d = riverPath(s.pts);
           K.svg('path', { class: 'st-w', d }, g);
-          s.path = K.svg('path', { class: 'st-l', d }, g);
+          K.svg('path', { class: 'st-l', d }, g);
+          s.walk = pathWalker(d);
           K.svg('path', { class: 'st-hit', d }, g);
           s.dots = [0, 1].map(() => K.svg('circle', { class: 'tf-dot', r: 6, cx: -99, cy: -99 }, g));
           groups.push(g);
@@ -683,16 +751,18 @@
           select(+t.dataset.i);
         });
 
+        // Points come from pathWalker, not getPointAtLength: each DOM query after the previous dot's
+        // write forced a style+layout pass (16 per frame). Opacity is written only when it changes.
         let off = 0;
         function placeDots() {
           STREAMS.forEach((s, i) => {
-            if (!s.len) s.len = s.path.getTotalLength();
-            const L = s.len;
+            const L = s.walk.total;
             s.dots.forEach((c, j) => {
               const d = (off * (0.9 + (i % 3) * 0.12) + (j * L) / 2 + i * 57) % L;
-              const p = s.path.getPointAtLength(d);
+              const p = s.walk.at(d);
               c.setAttribute('cx', p.x.toFixed(1)); c.setAttribute('cy', p.y.toFixed(1));
-              c.style.opacity = Math.max(0, Math.min(1, d / 40, (L - d) / 40)).toFixed(2);
+              const o = Math.max(0, Math.min(1, d / 40, (L - d) / 40)).toFixed(2);
+              if (c._op !== o) { c._op = o; c.style.opacity = o; }
             });
           });
         }

@@ -404,7 +404,10 @@
   #f-recap-2 .tl .tip { fill:none; stroke:var(--ink-3); stroke-width:4; stroke-linecap:round; stroke-linejoin:round; }
   #f-recap-2 .tl .dot { fill:var(--paper); stroke:var(--ink); stroke-width:4.5; }
   #f-recap-2 .tl .dot.hot { fill:var(--hl); }
-  #f-recap-2 .tl .ext { fill:none; stroke:var(--ink); stroke-width:4.5; stroke-linecap:round; stroke-dasharray:1 1; stroke-dashoffset:0; transition:stroke-dashoffset .8s ease; }
+  #f-recap-2 .tl .ext { fill:none; stroke:var(--ink); stroke-width:4.5; stroke-linecap:round; stroke-dasharray:1 1; stroke-dashoffset:0; }
+  /* the draw-in runs only on the current frame: leaving at step 0 shows the line at once instead of repainting it
+     every frame of the outgoing flight */
+  #f-recap-2.current .tl .ext { transition:stroke-dashoffset .8s ease; }
   #f-recap-2.current .tl .ext.pending { opacity:1; transform:none; stroke-dashoffset:1; transition:none; }
   #f-recap-2 .tl .arc { fill:none; stroke:var(--pen); stroke-width:3.5; stroke-linecap:round; stroke-linejoin:round; }
   #f-recap-2 .tf-card { position:absolute; left:10px; right:10px; top:258px; height:240px; padding:18px 16px; background:var(--paper); border:4px solid var(--ink); border-radius:18px 6px 16px 5px / 6px 16px 5px 18px; transform:rotate(-3deg); display:flex; flex-direction:column; justify-content:center; align-items:center; gap:10px; text-align:center; box-shadow:var(--shadow); transition:transform .6s cubic-bezier(.2,1.5,.4,1); }
@@ -466,7 +469,12 @@ ${recapNodes}
   #f-transformer .pp.st { top:${ROW0 + 8 * ROWH + 42}px; font-family:var(--font-mono); font-size:20px; color:var(--ink-2); }
   #f-transformer svg.tr-svg { position:absolute; left:0; top:0; width:1600px; height:900px; overflow:visible; pointer-events:none; }
   #f-transformer .tr-svg .sd { fill:var(--ink); }
-  #f-transformer .tr-svg .l { fill:none; stroke:var(--ink-2); stroke-width:2.8; stroke-linecap:round; stroke-dasharray:1 1; stroke-dashoffset:0; transition:stroke-dashoffset 1.1s ease; }
+  #f-transformer .tr-svg .l { fill:none; stroke:var(--ink-2); stroke-width:2.8; stroke-linecap:round; stroke-dasharray:1 1; stroke-dashoffset:0; transition:none; }
+  /* the 8 lines draw in only on the current frame: leaving at step 0 shows them at once instead of repainting
+     them every frame of the outgoing flight. The base rule needs transition:none, not just no transition: the
+     inline transition-delay with the default 0 s duration would still delay (and stagger) every change, e.g.
+     the stroke colour on a theme switch. */
+  #f-transformer.current .tr-svg .l { transition:stroke-dashoffset 1.1s ease; }
   #f-transformer .tr-svg .l.hot { stroke:var(--pen); stroke-width:5.5; }
   #f-transformer .tr-svg .ah { fill:none; stroke:var(--ink-2); stroke-width:2.8; stroke-linecap:round; stroke-linejoin:round; }
   #f-transformer .tr-svg .ah.hot { stroke:var(--pen); stroke-width:5; }
@@ -567,7 +575,9 @@ ${recapNodes}
           let hidden = 0;
           while (over() && chips.children.length > 2) { more.previousElementSibling.remove(); more.textContent = `… +${++hidden}`; }
         }
+        let fontsDirty = false;
         const render = () => {
+          fontsDirty = false;
           const text = input.value;
           const toks = tokenize(text);
           chips.innerHTML = toks.length
@@ -591,8 +601,13 @@ ${recapNodes}
         });
         render();
         f._fit = render;
-        /* 웹 글꼴은 글자 묶음별로 늦게 도착할 수 있음 → 도착하면 칩 줄바꿈을 다시 맞춤 */
-        if (document.fonts && document.fonts.addEventListener) document.fonts.addEventListener('loadingdone', () => render());
+        /* 웹 글꼴은 글자 묶음별로 늦게 도착할 수 있음 → 도착하면 칩 줄바꿈을 다시 맞춤.
+           While the frame is hidden (.off, far from the camera) the rebuild and its forced layouts wait: the
+           class observer runs it as a microtask the moment .off goes, before the frame is first painted. */
+        if (document.fonts && document.fonts.addEventListener) {
+          document.fonts.addEventListener('loadingdone', () => { if (el.classList.contains('off')) fontsDirty = true; else render(); });
+          new MutationObserver(() => { if (fontsDirty && !el.classList.contains('off')) render(); }).observe(el, { attributes: true, attributeFilter: ['class'] });
+        }
       },
       enter(el, K, f) { if (f._fit) f._fit(); },
     },
@@ -617,7 +632,10 @@ ${recapNodes}
   #f-next-token .nt-row:hover { background:var(--pen-soft); }
   #f-next-token .nt-row .w { font-size:30px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   #f-next-token .nt-row .tr { height:30px; background:var(--paper-2); position:relative; }
-  #f-next-token .nt-row .fl { position:absolute; left:0; top:0; bottom:0; width:0; background:var(--ink); transition:width .35s ease; }
+  #f-next-token .nt-row .fl { position:absolute; left:0; top:0; bottom:0; width:0; background:var(--ink); }
+  /* widths animate only on the current frame: the reset on leave snaps instead of re-laying out the bars every
+     frame of the outgoing flight */
+  #f-next-token.current .nt-row .fl { transition:width .35s ease; }
   #f-next-token .nt-row.pick { background:var(--hl-soft); }
   #f-next-token .nt-row.pick .fl { background:var(--pen); }
   #f-next-token .nt-row .p { font-family:var(--font-mono); font-size:26px; text-align:right; font-variant-numeric:tabular-nums; }
@@ -746,7 +764,8 @@ ${recapNodes}
           }
         });
         reset(0);
-        f._reset = () => reset();
+        // nothing generated, nothing pending: the sentence and bars already show the reset state
+        f._reset = () => { if (gen.length || pend || auto) reset(); };
       },
       leave(el, K, f) { if (f._reset) f._reset(); },
     },
@@ -823,11 +842,15 @@ ${recapNodes}
           nodes[w] = g;
         });
         let ex = 0, prog = 1, hover = null, res = '';
+        // draw() runs every frame of the 2.2 s arrow animation; write an attribute or text only when it changes
+        const setA = (n, k, val) => { val = String(val); if (n['_' + k] !== val) { n['_' + k] = val; n.setAttribute(k, val); } };
+        let eqHTML = null;
+        const exBtns = el.querySelectorAll('.em-ex .btn');
         const arrowHead = (path, x1, y1, x2, y2, size) => {
           const L = Math.hypot(x2 - x1, y2 - y1);
-          if (L < 4) { path.setAttribute('d', ''); return; }
+          if (L < 4) { setA(path, 'd', ''); return; }
           const ux = (x2 - x1) / L, uy = (y2 - y1) / L;
-          path.setAttribute('d', `M${x2},${y2} L${x2 - ux * size - uy * size * 0.6},${y2 - uy * size + ux * size * 0.6} L${x2 - ux * size + uy * size * 0.6},${y2 - uy * size - ux * size * 0.6}Z`);
+          setA(path, 'd', `M${x2},${y2} L${x2 - ux * size - uy * size * 0.6},${y2 - uy * size + ux * size * 0.6} L${x2 - ux * size + uy * size * 0.6},${y2 - uy * size - ux * size * 0.6}Z`);
         };
         function nearest(x, y, skip) {
           let best = null, bd = Infinity;
@@ -841,20 +864,23 @@ ${recapNodes}
           const p1 = K.ease(K.clamp(prog / 0.35, 0, 1)), p2 = K.ease(K.clamp((prog - 0.35) / 0.4, 0, 1)), p3 = K.easeOut(K.clamp((prog - 0.75) / 0.25, 0, 1));
           const VL = Math.hypot(vx, vy) || 1, ux = vx / VL, uy = vy / VL;
           const e1x = bx + (vx - ux * 11) * p1, e1y = by + (vy - uy * 11) * p1, e2x = ax + (vx - ux * 11) * p2, e2y = ay + (vy - uy * 11) * p2;
-          v1.setAttribute('d', p1 > 0 ? `M${bx},${by} L${e1x},${e1y}` : '');
+          setA(v1, 'd', p1 > 0 ? `M${bx},${by} L${e1x},${e1y}` : '');
           arrowHead(a1, bx, by, e1x, e1y, 16);
-          v2.setAttribute('d', p2 > 0 ? `M${ax},${ay} L${e2x},${e2y}` : '');
+          setA(v2, 'd', p2 > 0 ? `M${ax},${ay} L${e2x},${e2y}` : '');
           arrowHead(a2, ax, ay, e2x, e2y, 20);
           const lt = E.labT || 0.5;
-          vl.setAttribute('x', bx + (cx - bx) * lt + 16); vl.setAttribute('y', by + (cy - by) * lt + 2);
-          vl.textContent = p1 > 0.5 ? `−${E.b} +${E.c}` : '';
+          setA(vl, 'x', bx + (cx - bx) * lt + 16); setA(vl, 'y', by + (cy - by) * lt + 2);
+          const vt = p1 > 0.5 ? `−${E.b} +${E.c}` : '';
+          if (vl.textContent !== vt) vl.textContent = vt;
           const [rx, ry] = EMB_POS[res];
           const lw = 13 + 27 * res.length;
-          ring.setAttribute('cx', rx + lw / 2 - 4); ring.setAttribute('cy', ry); ring.setAttribute('rx', ((lw / 2 + 22) * p3).toFixed(1)); ring.setAttribute('ry', (34 * p3).toFixed(1));
-          eq.innerHTML = `${E.a} − ${E.b} + ${E.c}<br><span class="r" style="opacity:${p3.toFixed(2)}">≈ <span class="mark">${res}</span></span>`;
+          setA(ring, 'cx', rx + lw / 2 - 4); setA(ring, 'cy', ry); setA(ring, 'rx', ((lw / 2 + 22) * p3).toFixed(1)); setA(ring, 'ry', (34 * p3).toFixed(1));
+          const h = `${E.a} − ${E.b} + ${E.c}<br><span class="r" style="opacity:${p3.toFixed(2)}">≈ <span class="mark">${res}</span></span>`;
+          if (h !== eqHTML) { eqHTML = h; eq.innerHTML = h; }
           Object.keys(nodes).forEach((w) => nodes[w].classList.toggle('on', w === hover || (p3 > 0.5 && w === res)));
-          co.textContent = `${hover || res} = ${coordTxt(hover || res)}`;
-          el.querySelectorAll('.em-ex .btn').forEach((b) => b.classList.toggle('on', +b.dataset.i === ex));
+          const ct = `${hover || res} = ${coordTxt(hover || res)}`;
+          if (co.textContent !== ct) co.textContent = ct;
+          exBtns.forEach((b) => b.classList.toggle('on', +b.dataset.i === ex));
         }
         el.querySelector('.em-ex').addEventListener('click', (e) => {
           const b = e.target.closest('[data-i]');
@@ -865,7 +891,7 @@ ${recapNodes}
         svg.addEventListener('pointerdown', (e) => { if (e.pointerType === 'mouse') return; const g = e.target.closest('.wd'); if (g) { hover = g.dataset.w; draw(); } });
         svg.addEventListener('mouseleave', () => { hover = null; draw(); });
         K.loop(el, (t, dt) => { if (prog < 1) { prog = Math.min(1, prog + dt / 2.2); draw(); } });
-        f._finish = () => { prog = 1; hover = null; draw(); };
+        f._finish = () => { if (prog < 1 || hover !== null) { prog = 1; hover = null; draw(); } };
         draw();
       },
       leave(el, K, f) { if (f._finish) f._finish(); },
@@ -925,21 +951,35 @@ ${recapNodes}
         for (let i = 0; i < 10; i++) for (let j = 0; j < 10; j++) mh += `<rect class="c" data-i="${i}" x="${3 + j * CS + CG}" y="${3 + i * CS + CG}" width="${CS - 2 * CG}" height="${CS - 2 * CG}"/>`;
         mat.innerHTML = mh + `<rect class="rw" x="1.5" y="0" width="203" height="${CS + 3}"/>`;
         const cells = Array.from(mat.querySelectorAll('rect.c')), rowRect = mat.querySelector('rect.rw');
+        let stale = false; // a web font arrived after the last measure (word widths may have changed)
+        if (document.fonts && document.fonts.addEventListener) document.fonts.addEventListener('loadingdone', () => { stale = true; });
         function measure() {
           pos = spans.map((s) => ({ x: wordsEl.offsetLeft + s.offsetLeft + s.offsetWidth / 2, y: wordsEl.offsetTop + s.offsetTop - 2 }));
+          stale = false;
         }
+        /* 9 arcs (path + dot), kept and updated in place: rebuilding them with innerHTML every frame while the
+           weights settle meant new nodes and full style work each frame. Slot i takes the i-th lightest arc, so
+           the paint order is the same as before; attributes are written only when their text changes. */
+        const arcEls = [];
+        const setA = (n, k, val) => { if (n['_' + k] !== val) { n['_' + k] = val; n.setAttribute(k, val); } };
         function drawArcs() {
           if (!pos.length) return;
+          if (!arcEls.length) for (let i = 0; i < 9; i++) arcEls.push([K.svg('path', null, svg), K.svg('circle', null, svg)]);
           const p0 = pos[focus];
-          let h = '';
           const order = cur.map((w, j) => [w, j]).filter(([, j]) => j !== focus).sort((a, b) => a[0] - b[0]);
-          order.forEach(([w, j]) => {
-            const p1 = pos[j], dx = Math.abs(p1.x - p0.x), hh = Math.min(540, 70 + dx * 0.74);
-            h += `<path d="M${p0.x.toFixed(1)},${p0.y} Q${((p0.x + p1.x) / 2).toFixed(1)},${(p0.y - hh).toFixed(1)} ${p1.x.toFixed(1)},${p1.y}" style="stroke-width:${(1.2 + w * 30).toFixed(2)};opacity:${(0.16 + 0.84 * Math.min(1, w * 1.8)).toFixed(2)}"/>`;
-            h += `<circle cx="${p1.x.toFixed(1)}" cy="${p1.y}" r="${(3 + w * 11).toFixed(1)}" style="opacity:${(0.3 + 0.7 * Math.min(1, w * 1.8)).toFixed(2)}"/>`;
+          order.forEach(([w, j], i) => {
+            const p1 = pos[j], dx = Math.abs(p1.x - p0.x), hh = Math.min(540, 70 + dx * 0.74), [pe, ce] = arcEls[i];
+            setA(pe, 'd', `M${p0.x.toFixed(1)},${p0.y} Q${((p0.x + p1.x) / 2).toFixed(1)},${(p0.y - hh).toFixed(1)} ${p1.x.toFixed(1)},${p1.y}`);
+            setA(pe, 'style', `stroke-width:${(1.2 + w * 30).toFixed(2)};opacity:${(0.16 + 0.84 * Math.min(1, w * 1.8)).toFixed(2)}`);
+            setA(ce, 'cx', p1.x.toFixed(1));
+            setA(ce, 'cy', String(p1.y));
+            setA(ce, 'r', (3 + w * 11).toFixed(1));
+            setA(ce, 'style', `opacity:${(0.3 + 0.7 * Math.min(1, w * 1.8)).toFixed(2)}`);
           });
-          svg.innerHTML = h;
         }
+        // the 10×10 table depends only on M (the variant), not on the focus
+        function paintMatrix() { cells.forEach((c, k) => { const i = Math.floor(k / 10), j = k % 10; c.style.fillOpacity = Math.pow(Math.min(1, M[i][j] * 1.6), 0.8).toFixed(3); }); }
+        let ansHTML = '';
         function render() {
           const ws = words(), row = M[focus];
           let top = -1;
@@ -950,13 +990,13 @@ ${recapNodes}
             s.classList.toggle('top', j === top);
             s.querySelector('.pc').textContent = j === focus ? '' : pctTxt(row[j]);
           });
-          cells.forEach((c, k) => { const i = Math.floor(k / 10), j = k % 10; c.style.fillOpacity = Math.pow(Math.min(1, M[i][j] * 1.6), 0.8).toFixed(3); });
           rowRect.setAttribute('y', (1.5 + focus * CS).toFixed(1));
-          ans.innerHTML = `${ws[focus]} → <span class="mark">${ws[top]}</span>`;
+          const a = `${ws[focus]} → <span class="mark">${ws[top]}</span>`;
+          if (a !== ansHTML) { ansHTML = a; ans.innerHTML = a; }
           el.querySelectorAll('.at-v').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
         }
         function setFocus(i) { if (i === focus) return; focus = i; cur = cur.map(() => 0); render(); }
-        function setVar(nv) { v = nv; M = atMatrix(v); render(); requestLayout(); }
+        function setVar(nv) { v = nv; M = atMatrix(v); paintMatrix(); render(); requestLayout(); }
         let needLayout = true;
         const requestLayout = () => { needLayout = true; };
         wordsEl.addEventListener('mouseover', (e) => { const s = e.target.closest('.at-w'); if (s) setFocus(+s.dataset.i); });
@@ -977,8 +1017,13 @@ ${recapNodes}
           if (moved) drawArcs();
         });
         K.onTheme(() => { measure(); drawArcs(); });
-        f._home = () => { v = 'tired'; M = atMatrix(v); focus = 6; cur = M[6].slice(); render(); measure(); drawArcs(); };
-        render(); measure(); drawArcs();
+        f._home = () => {
+          // already home and settled, and no font change since the last measure: all of the below would be a no-op
+          // except a forced layout right as the camera starts to fly
+          if (!stale && v === 'tired' && focus === 6 && cur.every((w, j) => w === M[6][j])) return;
+          v = 'tired'; M = atMatrix(v); paintMatrix(); focus = 6; cur = M[6].slice(); render(); measure(); drawArcs();
+        };
+        paintMatrix(); render(); measure(); drawArcs();
       },
       enter(el, K, f) { if (f._home) f._home(); },
       leave(el, K, f) { if (f._home) f._home(); },
@@ -1100,15 +1145,15 @@ ${recapNodes}
   #f-hallucination .hl-a { position:relative; }
   #f-hallucination .hl-a.done .fake { text-decoration:underline wavy var(--bad) 2.5px; text-underline-offset:7px; }
   #f-hallucination .hl-a .who { font-family:var(--font-mono); font-size:22px; color:var(--ink-3); align-self:center; margin-right:.2em; }
-  #f-hallucination .hl-a .caret { display:inline-block; width:4px; height:1.05em; align-self:center; background:var(--pen); animation:hl-blink 1s steps(2, start) infinite; }
+  #f-hallucination .hl-a .caret { display:inline-block; width:4px; height:1.05em; align-self:center; background:var(--pen); }
   #f-hallucination .hl-a.done .caret { display:none; }
-  @keyframes hl-blink { to { visibility:hidden; } }
   #f-hallucination .hl-leg { position:absolute; right:18px; bottom:8px; font-size:20px; color:var(--bad); opacity:0; transition:opacity .3s; }
   #f-hallucination .hl-a.done .hl-leg { opacity:1; }
   #f-hallucination .hl-row { display:grid; grid-template-columns:220px 1fr 80px; align-items:center; gap:14px; height:46px; }
   #f-hallucination .hl-row .w { font-size:27px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   #f-hallucination .hl-row .tr { height:26px; background:var(--paper-2); position:relative; }
-  #f-hallucination .hl-row .fl { position:absolute; left:0; top:0; bottom:0; background:var(--ink-3); transition:width .25s ease; }
+  #f-hallucination .hl-row .fl { position:absolute; left:0; top:0; bottom:0; background:var(--ink-3); }
+  #f-hallucination.current .hl-row .fl { transition:width .25s ease; } /* not on leave: see next-token */
   #f-hallucination .hl-row.pick .fl { background:var(--pen); }
   #f-hallucination .hl-row.pick .w { color:var(--pen); }
   #f-hallucination .hl-row .p { font-family:var(--font-mono); font-size:24px; text-align:right; }
@@ -1146,7 +1191,8 @@ ${recapNodes}
         const wEls = Array.from(aEl.querySelectorAll('.wd'));
         bars.innerHTML = [0, 1, 2].map(() => '<div class="hl-row"><span class="w"></span><span class="tr"><i class="fl"></i></span><span class="p"></span></div>').join('');
         const rows = Array.from(bars.children);
-        let k = HS.length, ph = 1, playing = false, acc = 0, wait = 0;
+        const caret = aEl.querySelector('.caret');
+        let k = HS.length, ph = 1, playing = false, acc = 0, wait = 0, blink0 = null, blinkAnim = null, lastTick = -1, blinkTO = 0;
         function render() {
           wEls.forEach((w, i) => { w.style.display = i < k ? '' : 'none'; w.classList.toggle('last', i === k - 1 && playing); });
           aEl.classList.toggle('done', k >= HS.length && !playing);
@@ -1160,11 +1206,61 @@ ${recapNodes}
             r.classList.toggle('pick', pick && w === s.w);
           });
         }
-        function play() { k = 0; ph = 0; acc = 0; wait = 0; playing = true; render(); }
+        function play() {
+          const shows = aEl.classList.contains('done'); // the caret was display:none and appears now
+          k = 0; ph = 0; acc = 0; wait = 0; playing = true; render();
+          // Like the CSS animation this replaces (visible 0.5 s, hidden 0.5 s), the blink restarts only when the
+          // caret appears; a replay while it is already showing keeps the running phase.
+          if (shows || blink0 == null) {
+            caret.style.visibility = '';
+            // A CSS animation's start time is the frame in which its style is first resolved: this frame when
+            // called from a frame callback (arrival), the next one otherwise. An empty Web Animation created now
+            // gets exactly that start time (the loop reads it on its first tick, then drops the animation).
+            blink0 = null;
+            if (blinkAnim) blinkAnim.cancel();
+            try { blinkAnim = caret.animate(null, 1); } catch (e) { blinkAnim = null; }
+          }
+          blinkWatch();
+        }
+        // the caret for frame time t (s); the first call after a restart fixes the blink's start time
+        function blinkAt(t) {
+          if (blink0 == null) {
+            // not resolved yet = it starts this frame
+            blink0 = blinkAnim && blinkAnim.startTime != null ? blinkAnim.startTime / 1000 : t;
+            if (blinkAnim) { blinkAnim.cancel(); blinkAnim = null; }
+          }
+          const vis = (t - blink0) % 1 < 0.5 ? '' : 'hidden';
+          if (caret.style.visibility !== vis) caret.style.visibility = vis;
+        }
+        /* The engine stops loops without a leave() in the overview and in free zoom, mid-playback; the CSS blink
+           kept going there. So while playing, a timer wakes at each half-period boundary and, if the loop has not
+           ticked lately, flips the caret in the first frame at or after the boundary (the same test as the loop). */
+        function blinkWatch() {
+          clearTimeout(blinkTO); blinkTO = 0;
+          if (!playing) return;
+          const now = performance.now() / 1000;
+          const next = blink0 == null ? now + 0.05 : blink0 + (Math.floor((now - blink0) * 2) + 1) / 2;
+          blinkTO = setTimeout(() => {
+            blinkTO = 0;
+            if (!playing) return;
+            if (performance.now() / 1000 - lastTick < 0.1) { blinkWatch(); return; } // the loop is running
+            const frame = (ts) => {
+              if (!playing) return;
+              if (ts / 1000 < next) { requestAnimationFrame(frame); return; }
+              blinkAt(ts / 1000);
+              blinkWatch();
+            };
+            requestAnimationFrame(frame);
+          }, Math.max(0, Math.ceil((next - now) * 1000))); // whole ms, never before the boundary
+        }
         el.querySelector('.hl-replay').addEventListener('click', play);
         el.querySelector('.hl-cks').addEventListener('click', (e) => { const b = e.target.closest('.hl-ck'); if (b) b.classList.toggle('on'); });
         K.loop(el, (t, dt) => {
           if (!playing) return;
+          /* Caret blink. As an infinite CSS animation it ran style work every frame; here it touches the DOM
+             twice a second (blinkWatch covers the times the engine stops this loop). */
+          lastTick = t;
+          blinkAt(t);
           if (wait > 0) { wait -= dt; return; }
           acc += dt;
           if (ph === 0 && acc > 0.3) { ph = 1; render(); }

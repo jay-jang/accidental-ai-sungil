@@ -291,6 +291,8 @@
         const clock = el.querySelector('.cm-t');
         const goal = el.querySelector('.cm-goal');
         const st = { key: 'big', t: RACE_SECONDS, running: false };
+        // per lane: bar and result elements plus what was last written to them. draw() runs every
+        // frame of the race; rewriting an unchanged result's innerHTML replaced its nodes (relayout + repaint).
         let rows = [];
         const build = () => {
           const R = RACE[st.key];
@@ -300,25 +302,29 @@
               <div class="cm-track"><i class="cm-bar"></i></div>
               <div class="cm-res"></div>
             </div>`).join('');
-          rows = Array.from(host.children);
+          rows = Array.from(host.children, (row) => ({ bar: row.querySelector('.cm-bar'), res: row.querySelector('.cm-res'), w: null, done: null }));
           goal.textContent = '결승선 = ' + R.goal;
           el.querySelectorAll('[data-r]').forEach((c) => c.classList.toggle('on', c.dataset.r === st.key));
           // finishing order (starred lanes are counted differently, so they get no rank)
           const order = R.lanes.filter((l) => !l.star).slice().sort((a, b) => a.m - b.m);
           R.lanes.forEach((l) => { l.rank = l.star ? 0 : order.indexOf(l) + 1; });
         };
+        let clockTxt = null;
         const draw = () => {
           const R = RACE[st.key];
           const months = (R.max * st.t) / RACE_SECONDS;
-          clock.textContent = fmtElapsed(Math.min(months, R.max));
+          const ct = fmtElapsed(Math.min(months, R.max));
+          if (ct !== clockTxt) { clockTxt = ct; clock.textContent = ct; }
           R.lanes.forEach((l, i) => {
             const p = Math.min(1, months / l.m);
             const row = rows[i];
-            row.querySelector('.cm-bar').style.width = (p * 100).toFixed(2) + '%';
-            const res = row.querySelector('.cm-res');
+            const w = (p * 100).toFixed(2) + '%';
+            if (w !== row.w) { row.w = w; row.bar.style.width = w; }
             const done = p >= 1;
-            res.style.opacity = done ? 1 : 0;
-            res.innerHTML = done ? (l.rank ? `<i>${l.rank}위</i>` : '<i>기준 다름</i>') + l.txt : '';
+            if (done === row.done) return;
+            row.done = done;
+            row.res.style.opacity = done ? 1 : 0;
+            row.res.innerHTML = done ? (l.rank ? `<i>${l.rank}위</i>` : '<i>기준 다름</i>') + l.txt : '';
           });
         };
         const run = () => { st.t = 0; st.running = true; draw(); };
@@ -522,9 +528,12 @@
         circ.remove();
         const num = el.querySelector('.nb-n');
         const st = { t: 1, run: false };
+        let shownN = 200;   // the cells are built filled, as for n = 200; repaint only the cells that change
         const paint = () => {
           const n = Math.max(1, Math.round(Kit.easeOut(Kit.clamp(st.t, 0, 1)) * 200));
-          cells.forEach((c, i) => { if (i) c.setAttribute('class', i < n ? 'on' : ''); });
+          if (n === shownN) return;
+          for (let i = Math.min(n, shownN); i < Math.max(n, shownN); i++) cells[i].setAttribute('class', i < n ? 'on' : '');
+          shownN = n;
           num.textContent = n >= 200 ? '2억+' : n >= 100 ? `${Math.floor(n / 100)}억${n % 100 ? ' ' + ((n % 100) * 100).toLocaleString('ko-KR') + '만' : ''}` : (n * 100).toLocaleString('ko-KR') + '만';
         };
         K.loop(el, (t, dt) => {
